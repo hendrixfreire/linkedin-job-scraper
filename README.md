@@ -1,127 +1,127 @@
 # LinkedIn Job Scraper
 
-A Python scraper for [LinkedIn's public Guest API](https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search) that finds job postings, deduplicates them across runs, and prepares a JSON file for an LLM agent to classify and report.
+Scraper em Python para a [API pública Guest do LinkedIn](https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search) que busca vagas de emprego, elimina duplicatas entre execuções, e prepara um arquivo JSON para um agente LLM classificar e reportar.
 
-Built to run on cron with zero infrastructure — no database, no auth, no LinkedIn login. Just plain files on disk.
+Feito pra rodar em cron sem nenhuma infraestrutura — sem banco de dados, sem autenticação, sem login no LinkedIn. Apenas arquivos em disco.
 
-## Features
+## Funcionalidades
 
-- **No authentication** — uses LinkedIn's public Guest API (HTML scraping)
-- **Triple deduplication**:
-  1. Persistent job IDs (`seen.json`)
-  2. Title + Company normalized keys (catches reposted jobs with new IDs)
-  3. Reads agent's previous outputs and skips already-reported jobs
-- **Heuristic scoring** — pre-computes a 1-5 star score per job so the LLM only re-evaluates borderline cases (~80% token savings)
-- **Keyword yield tracking** — auto-prunes keywords that produce nothing after 15+ runs
-- **Rate-limited parallel fetches** — 3 threads, 300ms between pages, 4-minute deadline
-- **Filter by location and seniority** — only Brazil/São Paulo, drops junior/intern
-- **Metrics dashboard** — see yield per keyword, recent runs, database size
+- **Sem autenticação** — usa a API pública Guest do LinkedIn (scraping de HTML)
+- **Deduplicação tripla**:
+  1. IDs persistentes das vagas (`seen.json`)
+  2. Chaves normalizadas título + empresa (pega vagas repostadas com ID novo)
+  3. Lê os outputs anteriores do agente e pula vagas já reportadas
+- **Scoring heurístico** — pré-calcula uma nota de 1-5 estrelas por vaga pra que o LLM só reavalie casos borderline (~80% de economia de tokens)
+- **Tracking de yield por keyword** — remove automaticamente keywords que não produzem nada após 15+ execuções
+- **Buscas paralelas com rate limiting** — 3 threads, 300ms entre páginas, deadline de 4 minutos
+- **Filtro por localização e senioridade** — apenas Brasil/São Paulo, remove júnior/estágio
+- **Dashboard de métricas** — vê yield por keyword, execuções recentes, tamanho da base
 
-## Requirements
+## Requisitos
 
 - Python 3.8+
-- No external dependencies (stdlib only)
+- Nenhuma dependência externa (apenas stdlib)
 
-## Installation
+## Instalação
 
 ```bash
-# Clone
+# Clonar
 git clone https://github.com/hendrixfreire/linkedin-job-scraper.git
 cd linkedin-job-scraper
 
-# Make scripts executable (optional)
+# Tornar scripts executáveis (opcional)
 chmod +x linkedin_jobs.py linkedin_metrics.py
 ```
 
-That's it. No `pip install`, no virtualenv, no API keys.
+Pronto. Sem `pip install`, sem virtualenv, sem chaves de API.
 
-## Quick Start
+## Início Rápido
 
 ```bash
-# Run once — creates ~/linkedin-jobs/ with all output files
+# Rodar uma vez — cria ~/linkedin-jobs/ com todos os arquivos de saída
 python3 linkedin_jobs.py
 
-# See what was collected
+# Ver o que foi coletado
 cat ~/linkedin-jobs/jobs_new.json
 
-# Check the human-readable history
+# Conferir o histórico legível
 head ~/linkedin-jobs/jobs.md
 
-# View metrics
+# Ver métricas
 python3 linkedin_metrics.py
 ```
 
-## Configuration
+## Configuração
 
-All user-specific settings are configured via environment variables. No config file to edit.
+Todas as configurações específicas do usuário são feitas via variáveis de ambiente. Não há arquivo de config pra editar.
 
-| Variable | Default | Description |
+| Variável | Padrão | Descrição |
 |----------|---------|-------------|
-| `LINKEDIN_OUTPUT_DIR` | `~/linkedin-jobs` | Where to save output files (jobs.md, jobs_new.json, seen.json, keywords.json) |
-| `LINKEDIN_USER_NAME` | `User` | Name to use in the jobs.md header |
-| `LINKEDIN_CRON_OUTPUT_DIR` | _(disabled)_ | Directory containing the agent's `.md` response files. When set, the scraper reads the last 3 files and excludes jobs already reported to the user. Requires the agent to write responses as `.md` files in this directory. |
+| `LINKEDIN_OUTPUT_DIR` | `~/linkedin-jobs` | Onde salvar os arquivos de saída (jobs.md, jobs_new.json, seen.json, keywords.json) |
+| `LINKEDIN_USER_NAME` | `User` | Nome pra usar no cabeçalho do jobs.md |
+| `LINKEDIN_CRON_OUTPUT_DIR` | _(desativado)_ | Diretório com os arquivos `.md` de resposta do agente. Quando definido, o scraper lê os últimos 3 arquivos e exclui vagas já reportadas ao usuário. Requer que o agente salve respostas como arquivos `.md` neste diretório. |
 
-### Example: custom output directory
+### Exemplo: diretório de saída personalizado
 
 ```bash
-export LINKEDIN_OUTPUT_DIR=~/my-job-search
+export LINKEDIN_OUTPUT_DIR=~/minha-busca-de-vagas
 python3 linkedin_jobs.py
 ```
 
-### Example: enable cross-run dedup with an agent
+### Exemplo: ativar dedup entre execuções com um agente
 
-If you have an LLM agent (e.g. [Hermes Agent](https://hermes-agent.nousresearch.com), Claude, ChatGPT) classifying jobs and writing responses to a directory:
+Se você tem um agente LLM (ex: [Hermes Agent](https://hermes-agent.nousresearch.com), Claude, ChatGPT) classificando vagas e salvando respostas num diretório:
 
 ```bash
-export LINKEDIN_CRON_OUTPUT_DIR=~/.my-agent/outputs
+export LINKEDIN_CRON_OUTPUT_DIR=~/.meu-agente/outputs
 python3 linkedin_jobs.py
 ```
 
-The scraper will read the last 3 `.md` files in that directory, extract job titles and companies from the response format `**N. ⭐⭐⭐ Job Title**`, and skip those jobs on the next run.
+O scraper vai ler os últimos 3 arquivos `.md` nesse diretório, extrair títulos e empresas das vagas do formato de resposta `**N. ⭐⭐⭐ Título da Vaga**`, e pular essas vagas na próxima execução.
 
-### Customizing keywords
+### Personalizando as keywords
 
-Edit the `KEYWORDS` list at the top of `linkedin_jobs.py`:
+Edite a lista `KEYWORDS` no topo do `linkedin_jobs.py`:
 
 ```python
 KEYWORDS = [
     "data engineer",
     "analytics engineer",
     "data analyst",
-    # ...add your own
+    # ...adicione as suas
 ]
 ```
 
-Each keyword generates 2 queries: Remote Brazil + São Paulo (no work-type filter). Manager/Head roles skip the seniority filter (they're senior by definition).
+Cada keyword gera 2 queries: Remoto Brasil + São Paulo (sem filtro de modalidade). Cargos de Manager/Head pulam o filtro de senioridade (já são sênior por definição).
 
-### Customizing filters
+### Personalizando os filtros
 
-Edit the `build_searches()` function to change:
-- **Location**: replace `"Brazil"` and `"São Paulo, Brazil"` with your target locations
-- **Seniority**: `f_E=4` means Mid-Senior. See [LinkedIn API filters](#linkedin-api-filters) below
-- **Posting time**: `f_TPR=r2592000` means last 30 days. Use `r604800` for 7 days, `r86400` for 24h
+Edite a função `build_searches()` pra mudar:
+- **Localização**: troque `"Brazil"` e `"São Paulo, Brazil"` pelas suas localizações alvo
+- **Senioridade**: `f_E=4` significa Mid-Senior. Veja [Filtros da API do LinkedIn](#filtros-da-api-do-linkedin) abaixo
+- **Tempo de publicação**: `f_TPR=r2592000` significa últimos 30 dias. Use `r604800` pra 7 dias, `r86400` pra 24h
 
-### Customizing the heuristic score
+### Personalizando o score heurístico
 
-The `heuristic_score()` function in `linkedin_jobs.py` scores each job 1-5 stars based on:
-- **Tech stack** (0-2 points): high-relevance keywords (data engineer, AI engineer) vs. mid-relevance (data analyst, BI, SQL)
-- **Seniority** (0-2 points): senior/lead/manager keywords, or assumed mid/senior if no indicator
-- **Location** (0-1 point): remote, Brazil, or São Paulo
+A função `heuristic_score()` no `linkedin_jobs.py` pontua cada vaga de 1-5 estrelas baseado em:
+- **Stack técnico** (0-2 pontos): keywords de alta relevância (data engineer, AI engineer) vs. média relevância (data analyst, BI, SQL)
+- **Senioridade** (0-2 pontos): keywords senior/lead/manager, ou assume pleno/sênior se não houver indicador
+- **Localização** (0-1 ponto): remoto, Brasil, ou São Paulo
 
-Edit the `high_skills` and `mid_skills` lists to match your profile.
+Edite as listas `high_skills` e `mid_skills` pra bater com seu perfil.
 
-## Output Files
+## Arquivos de Saída
 
-All files are created in `LINKEDIN_OUTPUT_DIR` (default: `~/linkedin-jobs/`):
+Todos os arquivos são criados em `LINKEDIN_OUTPUT_DIR` (padrão: `~/linkedin-jobs/`):
 
-| File | Description |
+| Arquivo | Descrição |
 |------|-------------|
-| `jobs_new.json` | New jobs for the agent to classify. Includes `heuristic_score` and `heuristic_reason` per job. Empty array `[]` when no new jobs. |
-| `jobs.md` | Human-readable job history. Append-only — never removes entries. Each job is a markdown block with title, company, location, mode, link, and short description. |
-| `seen.json` | Dedup state. Contains `seen_ids` (LinkedIn numeric IDs) and `seen_keys` (normalized `title\|\|company` strings). |
-| `keywords.json` | Per-keyword yield tracking. Each keyword has `total_runs`, `total_new`, `last_new`, `last_run`. Also tracks pruned keywords. |
+| `jobs_new.json` | Vagas novas pra o agente classificar. Inclui `heuristic_score` e `heuristic_reason` por vaga. Array vazio `[]` quando não há vagas novas. |
+| `jobs.md` | Histórico de vagas legível pra humanos. Append-only — nunca remove entradas. Cada vaga é um bloco markdown com título, empresa, localização, modalidade, link e descrição curta. |
+| `seen.json` | Estado de dedup. Contém `seen_ids` (IDs numéricos do LinkedIn) e `seen_keys` (strings normalizadas `título\|\|empresa`). |
+| `keywords.json` | Tracking de yield por keyword. Cada keyword tem `total_runs`, `total_new`, `last_new`, `last_run`. Também rastreia keywords removidas. |
 
-### jobs_new.json format
+### Formato do jobs_new.json
 
 ```json
 [
@@ -140,157 +140,157 @@ All files are created in `LINKEDIN_OUTPUT_DIR` (default: `~/linkedin-jobs/`):
 ]
 ```
 
-## Usage with an LLM Agent
+## Uso com um Agente LLM
 
-The scraper is designed to feed an LLM agent that classifies jobs and reports to the user. Example agent prompt:
+O scraper é desenhado pra alimentar um agente LLM que classifica vagas e reporta ao usuário. Exemplo de prompt de agente:
 
 ```text
-You are a job classifier. 
+Você é um classificador de vagas.
 
-1. Run: python3 linkedin_jobs.py
-2. Read: ~/linkedin-jobs/jobs_new.json
-3. If empty, respond "No new jobs." and stop.
-4. For each job, use the heuristic_score as a starting point.
-   Re-evaluate only if heuristic_reason seems wrong.
-5. Filter to 3+ stars only.
-6. Sort by posting date (newest first).
-7. Report in this format:
+1. Execute: python3 linkedin_jobs.py
+2. Leia: ~/linkedin-jobs/jobs_new.json
+3. Se estiver vazio, responda "Nenhuma vaga nova." e termine.
+4. Para cada vaga, use o heuristic_score como ponto de partida.
+   Reavalie apenas se heuristic_reason parecer errado.
+5. Filtre apenas 3+ estrelas.
+6. Ordene por data de publicação (mais recente primeiro).
+7. Reporte neste formato:
 
-   🔍 **N new jobs** — date
+   🔍 **N vagas novas** — data
 
-   **1. ⭐⭐⭐⭐⭐ 🔥 Job Title**
-   Company | Location | Mode
-   📅 Posted today | Match: short justification
-   [View job](url)
+   **1. ⭐⭐⭐⭐⭐ 🔥 Título da Vaga**
+   Empresa | Local | Modalidade
+   📅 Postada hoje | Match: justificativa curta
+   [Ver vaga](url)
 ```
 
-Save the agent's response as a `.md` file in `LINKEDIN_CRON_OUTPUT_DIR` so the next scraper run can skip already-reported jobs.
+Salve a resposta do agente como um arquivo `.md` em `LINKEDIN_CRON_OUTPUT_DIR` pra que a próxima execução do scraper pule as vagas já reportadas.
 
-### Cron example
+### Exemplo de cron
 
 ```bash
-# Run 3x daily: 8am, 1pm, 6pm
-0 8,13,18 * * * LINKEDIN_OUTPUT_DIR=~/linkedin-jobs LINKEDIN_CRON_OUTPUT_DIR=~/.agent/outputs python3 ~/linkedin-job-scraper/linkedin_jobs.py
+# Rodar 3x ao dia: 8h, 13h, 18h
+0 8,13,18 * * * LINKEDIN_OUTPUT_DIR=~/linkedin-jobs LINKEDIN_CRON_OUTPUT_DIR=~/.agente/outputs python3 ~/linkedin-job-scraper/linkedin_jobs.py
 ```
 
-## Metrics Dashboard
+## Dashboard de Métricas
 
 ```bash
 python3 linkedin_metrics.py
 ```
 
-Example output:
+Exemplo de saída:
 
 ```
 ============================================================
-  LinkedIn Job Scraper — Metrics Dashboard
+  LinkedIn Job Scraper — Dashboard de Métricas
   20/06/2026 15:00
 ============================================================
 
-## Database
-  Tracked IDs: 313
-  Title+Company keys: 283
-  Last update: 2026-06-20T15:01
+## Base de dados
+  IDs rastreados: 313
+  Chaves título+empresa: 283
+  Última atualização: 2026-06-20T15:01
 
-## Yield per Keyword
-  Keyword                         Runs  Yield     Last New
+## Yield por Keyword
+  Keyword                         Runs  Yield     Última nova
   ------------------------------ ----- ------ ------------
   data engineer                      5    12 (2.4/run) 2026-06-20
   AI engineer                        5     8 (1.6/run) 2026-06-20
-  BI manager                         5     0 (0 total) never
+  BI manager                         5     0 (0 total) nunca
 
-## Recent Runs
-        Date  Jobs First job title
+## Execuções recentes
+        Data  Vagas Primeira vaga
   ------------ ------ ----------------------------------------
   2026-06-20 15-00      8 Senior Data Engineer
   2026-06-20 13-00      5 Data Tech Lead
-  Total runs: 15
+  Total de execuções: 15
 
-## MD File
-  Jobs in MD: 313 (unique IDs: 313)
-  Size: 97KB, 3630 lines
+## Arquivo MD
+  Vagas no MD: 313 (IDs únicos: 313)
+  Tamanho: 97KB, 3630 linhas
 
 ============================================================
 ```
 
-## LinkedIn API Filters
+## Filtros da API do LinkedIn
 
-Reference for customizing `build_searches()`:
+Referência pra personalizar `build_searches()`:
 
-| Filter | Values | Description |
+| Filtro | Valores | Descrição |
 |--------|--------|-------------|
-| `f_TPR` | `r86400`, `r604800`, `r2592000` | Posting time: 24h, 7 days, 30 days |
-| `f_E` | `1`-`6` | Experience: 1=Intern, 2=Entry, 3=Associate, 4=Mid-Senior, 5=Director, 6=Executive |
-| `f_WT` | `1`, `2`, `3` | Work type: 1=On-site, 2=Remote, 3=Hybrid |
-| `sortBy` | `DD`, `R` | Sort by date descending, relevance |
-| `start` | `0`, `25`, `50`, ... | Pagination offset (25 per page) |
+| `f_TPR` | `r86400`, `r604800`, `r2592000` | Tempo de publicação: 24h, 7 dias, 30 dias |
+| `f_E` | `1`-`6` | Experiência: 1=Intern, 2=Entry, 3=Associate, 4=Mid-Senior, 5=Director, 6=Executive |
+| `f_WT` | `1`, `2`, `3` | Modalidade: 1=Presencial, 2=Remoto, 3=Híbrido |
+| `sortBy` | `DD`, `R` | Ordenar por data decrescente, relevância |
+| `start` | `0`, `25`, `50`, ... | Offset de paginação (25 por página) |
 
-## Limitations
+## Limitações
 
-- **Guest API only** — no authenticated endpoints, no application status, no saved jobs
-- **Rate limited** — LinkedIn may block if you hit the API too hard. The scraper uses 300ms between pages and 2s backoff on retries
-- **HTML parsing** — if LinkedIn changes their HTML structure, the regex parsers will break. Open an issue if this happens
-- **Max 8 jobs per run** — to stay within the 4-minute deadline and avoid API throttling. Adjust `MAX_DETAIL` in `main()` if you need more
-- **Brazil-focused** — default filters target Brazil/São Paulo. Edit `build_searches()` for other regions
+- **Apenas API Guest** — sem endpoints autenticados, sem status de candidatura, sem vagas salvas
+- **Rate limiting** — o LinkedIn pode bloquear se você bater muito na API. O scraper usa 300ms entre páginas e 2s de backoff em retries
+- **Parsing de HTML** — se o LinkedIn mudar a estrutura do HTML, os parsers de regex quebram. Abra uma issue se isso acontecer
+- **Máx 8 vagas por execução** — pra ficar dentro do deadline de 4 minutos e evitar throttling da API. Ajuste `MAX_DETAIL` em `main()` se precisar de mais
+- **Focado no Brasil** — filtros padrão focam em Brasil/São Paulo. Edite `build_searches()` pra outras regiões
 
-## How It Works
+## Como Funciona
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     SCRAPER (this repo)                      │
+│                     SCRAPER (este repo)                      │
 │                                                              │
-│  1. Load seen.json (IDs + keys)                             │
-│  2. Read last 3 agent outputs (skip reported jobs)          │
-│  3. Prune unproductive keywords                             │
-│  4. Search LinkedIn Guest API (2 pages × N queries)         │
-│  5. Triple dedup: ID + title/company + reported             │
-│  6. Filter: Brazil/SP only, no junior                       │
-│  7. Fetch details in parallel (3 threads, max 8 jobs)       │
-│  8. Save: seen.json + keywords.json + jobs_new.json + jobs.md│
+│  1. Carrega seen.json (IDs + chaves)                        │
+│  2. Lê últimos 3 outputs do agente (pula vagas reportadas)  │
+│  3. Remove keywords improdutivas                            │
+│  4. Busca na API Guest do LinkedIn (2 páginas × N queries)  │
+│  5. Dedup tripla: ID + título/empresa + reportadas          │
+│  6. Filtra: só Brasil/SP, sem júnior                        │
+│  7. Busca detalhes em paralelo (3 threads, máx 8 vagas)     │
+│  8. Salva: seen.json + keywords.json + jobs_new.json + jobs.md │
 │                                                              │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼ jobs_new.json
 ┌─────────────────────────────────────────────────────────────┐
-│                    LLM AGENT (separate)                      │
+│                    AGENTE LLM (separado)                     │
 │                                                              │
-│  1. Read jobs_new.json                                      │
-│  2. Use heuristic_score as starting point                   │
-│  3. Re-evaluate borderline cases (2-4 stars)                │
-│  4. Filter to 3+ stars                                      │
-│  5. Sort by date                                            │
-│  6. Report to user (Telegram, email, etc.)                  │
-│  7. Save response as .md in LINKEDIN_CRON_OUTPUT_DIR        │
+│  1. Lê jobs_new.json                                       │
+│  2. Usa heuristic_score como ponto de partida              │
+│  3. Reavalia casos borderline (2-4 estrelas)               │
+│  4. Filtra pra 3+ estrelas                                 │
+│  5. Ordena por data                                        │
+│  6. Reporta ao usuário (Telegram, email, etc.)             │
+│  7. Salva resposta como .md em LINKEDIN_CRON_OUTPUT_DIR    │
 │                                                              │
 └──────────────────────────┬──────────────────────────────────┘
                            │
-                           ▼ next scraper run reads this
-                      (back to top)
+                           ▼ próxima execução do scraper lê isso
+                      (volta ao topo)
 ```
 
 ## Troubleshooting
 
-**"No new jobs" every run**
-- Check `seen.json` — it may have grown too large. The scraper excludes any ID ever seen. To reset: delete `seen.json` and `jobs.md`.
-- Check `keywords.json` — keywords may have been pruned. Reset: delete `keywords.json`.
+**"Nenhuma vaga nova" toda execução**
+- Verifique `seen.json` — pode ter crescido demais. O scraper exclui qualquer ID já visto. Pra resetar: delete `seen.json` e `jobs.md`.
+- Verifique `keywords.json` — keywords podem ter sido removidas. Reset: delete `keywords.json`.
 
-**API returns empty results**
-- LinkedIn may be rate-limiting you. Wait 10-15 minutes.
-- The Guest API may be down. Try the URL directly in a browser: `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=data+engineer&location=Brazil&start=0`
-- Your IP may be blocked. Try a VPN or different network.
+**API retorna resultados vazios**
+- O LinkedIn pode estar limitando sua taxa. Espere 10-15 minutos.
+- A API Guest pode estar fora do ar. Teste a URL direto no navegador: `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=data+engineer&location=Brazil&start=0`
+- Seu IP pode estar bloqueado. Tente uma VPN ou rede diferente.
 
-**Duplicate jobs appearing**
-- Make sure `LINKEDIN_CRON_OUTPUT_DIR` is set if you're using an agent. Without it, the scraper can't know what was already reported.
-- Check that the agent's response format matches `**N. ⭐⭐⭐ Job Title**` (the regex expects stars).
+**Vagas duplicadas aparecendo**
+- Certifique-se de que `LINKEDIN_CRON_OUTPUT_DIR` está definido se você usa um agente. Sem isso, o scraper não sabe o que já foi reportado.
+- Verifique se o formato da resposta do agente bate com `**N. ⭐⭐⭐ Título da Vaga**` (o regex espera estrelas).
 
-## Contributing
+## Contribuindo
 
-1. Fork it
-2. Create your feature branch (`git checkout -b feature/foo`)
-3. Commit your changes (`git commit -am 'Add foo'`)
-4. Push to the branch (`git push origin feature/foo`)
-5. Create a Pull Request
+1. Faça um fork
+2. Crie sua branch de feature (`git checkout -b feature/foo`)
+3. Commit suas mudanças (`git commit -am 'Add foo'`)
+4. Push pra branch (`git push origin feature/foo`)
+5. Crie um Pull Request
 
-## License
+## Licença
 
-MIT — see [LICENSE](LICENSE).
+MIT — veja [LICENSE](LICENSE).
