@@ -1,0 +1,30 @@
+# Output files (created at runtime)
+jobs.md
+jobs_new.json
+seen.json
+keywords.json
+
+# Custom output directory (if user runs locally)
+linkedin-jobs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
