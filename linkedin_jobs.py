@@ -404,7 +404,7 @@ def save_full_state(seen_ids, seen_keys, new_ids, new_keys):
     }, ensure_ascii=False, indent=2))
 
 
-def load_recently_reported(max_files=3):
+def load_recently_reported(max_files=6):
     """Read last N agent outputs and extract jobs already reported to the user.
 
     This closes the loop: agent reports jobs → script reads outputs →
@@ -674,7 +674,7 @@ def main():
     # ═══ STEP 2: JOBS ALREADY REPORTED BY AGENT ═══
     # Read the last 3 cron outputs — what the agent already showed
     # the user can't appear again, even if the API returns it
-    recently_reported = load_recently_reported(max_files=3)
+    recently_reported = load_recently_reported()
     print(f"Recently reported jobs: {len(recently_reported)}", file=sys.stderr)
 
     # ═══ STEP 3: KEYWORDS + PRUNING ═══
