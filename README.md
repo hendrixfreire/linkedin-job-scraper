@@ -1,6 +1,6 @@
 # LinkedIn Job Scraper
 
-Scraper em Python para a [API pública Guest do LinkedIn](https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search) que busca vagas de emprego, elimina duplicatas entre execuções, e prepara um arquivo JSON para um agente LLM classificar e reportar.
+Scraper em Python para a API pública Guest do LinkedIn que busca vagas de emprego, elimina duplicatas entre execuções, e prepara um arquivo JSON para um agente LLM classificar e reportar.
 
 Feito pra rodar em cron sem nenhuma infraestrutura — sem banco de dados, sem autenticação, sem login no LinkedIn. Apenas arquivos em disco.
 
