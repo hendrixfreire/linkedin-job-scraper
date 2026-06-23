@@ -212,25 +212,74 @@ def extract_cv_keywords(cv_text):
 # JOB FETCHING
 # ═══════════════════════════════════════════════════════════════
 
-def fetch_job_description(job_id):
-    """Fetch full job description from LinkedIn Guest API."""
-    url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
-    try:
-        req = Request(url, headers=HEADERS)
-        with urlopen(req, timeout=10) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-    except (HTTPError, URLError, OSError) as e:
-        print(f"Error fetching job {job_id}: {e}", file=sys.stderr)
-        return None
+def fetch_job_description(job_id, retries=1):
+    """Fetch full job description + metadata from LinkedIn Guest API.
 
+    Returns dict with 'title', 'company', 'description' or None on failure.
+    Retries once on transient errors (consistent with scraper behavior).
+    """
+    url = f"https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
+
+    for attempt in range(retries + 1):
+        try:
+            req = Request(url, headers=HEADERS)
+            with urlopen(req, timeout=10) as resp:
+                html = resp.read().decode("utf-8", errors="replace")
+            break
+        except (HTTPError, URLError, OSError) as e:
+            if attempt < retries:
+                time.sleep(2)
+            else:
+                print(f"Error fetching job {job_id}: {e}", file=sys.stderr)
+                return None
+
+    # Clean HTML to text
     text = re.sub(r'<[^>]+>', ' ', html)
     text = re.sub(r'\s+', ' ', text).strip()
-    return text
+
+    # Try to extract job title from the HTML
+    title = "Unknown Role"
+    title_match = re.search(
+        r'<title>\s*(.*?)\s*</title>', html, re.IGNORECASE)
+    if not title_match:
+        title_match = re.search(
+            r'class="[^"]*top-card-layout__title[^"]*"[^>]*>\s*(.*?)\s*</h1>',
+            html, re.IGNORECASE | re.DOTALL)
+    if title_match:
+        raw_title = re.sub(r'<[^>]+>', '', title_match.group(1)).strip()
+        # LinkedIn titles often have "Job Details | LinkedIn" suffix
+        raw_title = re.sub(r'\s*\|\s*LinkedIn\s*$', '', raw_title).strip()
+        if raw_title and raw_title.lower() not in ('linkedin', 'job details'):
+            title = raw_title
+
+    # Try to extract company name
+    company = "Unknown Company"
+    company_match = re.search(
+        r'class="[^"]*topcard__org-name-link[^"]*"[^>]*>\s*(.*?)\s*</a>',
+        html, re.IGNORECASE | re.DOTALL)
+    if not company_match:
+        company_match = re.search(
+            r'class="[^"]*top-card-layout__second-subline[^"]*"[^>]*>\s*(.*?)\s*</span>',
+            html, re.IGNORECASE | re.DOTALL)
+    if company_match:
+        company = re.sub(r'<[^>]+>', '', company_match.group(1)).strip()
+        if not company or company.lower() in ('linkedin', ''):
+            company = "Unknown Company"
+
+    return {"title": title, "company": company, "description": text}
 
 
 def load_jobs_json(path):
     """Load jobs from the scraper's jobs_new.json."""
-    data = json.loads(Path(path).read_text())
+    try:
+        data = json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        print(f"Error: file not found: {path}", file=sys.stderr)
+        print("  Run the scraper first: python3 linkedin_jobs.py", file=sys.stderr)
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: invalid JSON in {path}: {e}", file=sys.stderr)
+        sys.exit(1)
     return data if isinstance(data, list) else []
 
 
@@ -274,7 +323,15 @@ def call_llm(system_prompt, user_prompt, max_tokens=3000):
     try:
         with urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read().decode("utf-8"))
+            if "choices" not in result:
+                error_msg = result.get("error", {}).get("message", str(result))
+                print(f"LLM API error: {error_msg}", file=sys.stderr)
+                return None
             return result["choices"][0]["message"]["content"]
+    except HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:300] if e.fp else ""
+        print(f"LLM API HTTP {e.code}: {body}", file=sys.stderr)
+        return None
     except Exception as e:
         print(f"LLM API error: {e}", file=sys.stderr)
         return None
@@ -455,8 +512,13 @@ def generate_llm_prompt(cv_text, job_title, job_company, job_description, match)
 # CLI COMMANDS
 # ═══════════════════════════════════════════════════════════════
 
-def cmd_tailor(cv_path, job_id=None, jobs_json=None, job_url=None):
-    """Tailor CV for a specific job — LLM if available, keyword fallback."""
+def cmd_tailor(cv_path, job_id=None, jobs_json=None, job_url=None,
+               force_keyword=False):
+    """Tailor CV for a specific job — LLM if available, keyword fallback.
+
+    Set force_keyword=True to skip LLM even when API key is set
+    (used by the 'prompt' command).
+    """
     cv_text = Path(cv_path).read_text()
 
     # --- Resolve job description ---
@@ -465,6 +527,11 @@ def cmd_tailor(cv_path, job_id=None, jobs_json=None, job_url=None):
     job_description = ""
 
     if job_id and jobs_json:
+        # Validate job_id
+        if not re.match(r'^\d{1,20}$', str(job_id)):
+            print(f"Error: invalid job ID: {job_id} (must be numeric)",
+                  file=sys.stderr)
+            sys.exit(1)
         jobs = load_jobs_json(jobs_json)
         target = get_job_from_json(jobs, job_id)
         if target:
@@ -475,12 +542,19 @@ def cmd_tailor(cv_path, job_id=None, jobs_json=None, job_url=None):
             print(f"Job ID {job_id} not found in {jobs_json}", file=sys.stderr)
             sys.exit(1)
     elif job_id:
+        # Validate job_id before making HTTP request
+        if not re.match(r'^\d{1,20}$', str(job_id)):
+            print(f"Error: invalid job ID: {job_id} (must be numeric)",
+                  file=sys.stderr)
+            sys.exit(1)
         print(f"Fetching job {job_id} from LinkedIn API...", file=sys.stderr)
-        desc = fetch_job_description(job_id)
-        if not desc:
+        job_data = fetch_job_description(job_id)
+        if not job_data:
             print("Failed to fetch job description.", file=sys.stderr)
             sys.exit(1)
-        job_description = desc
+        job_title = job_data.get("title", job_title)
+        job_company = job_data.get("company", job_company)
+        job_description = job_data.get("description", "")
     elif job_url:
         print("Paste the job description below (Ctrl+D to finish):", file=sys.stderr)
         job_description = sys.stdin.read()
@@ -497,9 +571,14 @@ def cmd_tailor(cv_path, job_id=None, jobs_json=None, job_url=None):
     # --- Tailor ---
     safe_title = re.sub(r'[^a-zA-Z0-9_-]', '_', job_title)[:40]
     safe_company = re.sub(r'[^a-zA-Z0-9_-]', '_', job_company)[:20]
+    # Guard against empty filenames (e.g., purely non-ASCII titles)
+    if not safe_title.strip('_'):
+        safe_title = f"job_{job_id or 'unknown'}"
+    if not safe_company.strip('_'):
+        safe_company = "company"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    if LLM_API_KEY:
+    if LLM_API_KEY and not force_keyword:
         # ═══ FULL LLM TAILORING ═══
         tailored = tailor_with_llm(cv_text, job_title, job_company,
                                     job_description)
@@ -592,7 +671,8 @@ def cmd_analyze(cv_path, jobs_path):
 
 def cmd_prompt(cv_path, job_id=None, jobs_json=None):
     """Generate LLM prompt for a specific job (always keyword-based)."""
-    cmd_tailor(cv_path, job_id=job_id, jobs_json=jobs_json)
+    cmd_tailor(cv_path, job_id=job_id, jobs_json=jobs_json,
+               force_keyword=True)
 
 
 def print_usage():
@@ -617,7 +697,7 @@ Free keyword mode (no API key):
 def main():
     args = sys.argv[1:]
 
-    if not args:
+    if not args or args[0] in ("--help", "-h", "help"):
         print_usage()
         return
 
@@ -626,6 +706,7 @@ def main():
     job_id = None
     jobs_json = None
     job_url = None
+    unknown_flags = []
 
     i = 1 if cmd in ("analyze", "prompt") else 0
 
@@ -643,13 +724,33 @@ def main():
 
     while i < len(args):
         if args[i] == "--job-id":
-            job_id = args[i + 1]; i += 2
+            if i + 1 < len(args):
+                job_id = args[i + 1]; i += 2
+            else:
+                print("Error: --job-id requires a value", file=sys.stderr)
+                sys.exit(1)
         elif args[i] == "--json":
-            jobs_json = args[i + 1]; i += 2
+            if i + 1 < len(args):
+                jobs_json = args[i + 1]; i += 2
+            else:
+                print("Error: --json requires a value", file=sys.stderr)
+                sys.exit(1)
         elif args[i] == "--job-url":
-            job_url = args[i + 1]; i += 2
+            if i + 1 < len(args):
+                job_url = args[i + 1]; i += 2
+            else:
+                print("Error: --job-url requires a value", file=sys.stderr)
+                sys.exit(1)
+        elif args[i].startswith("--"):
+            unknown_flags.append(args[i])
+            i += 1
         else:
             i += 1
+
+    if unknown_flags:
+        print(f"Warning: unknown flag(s): {', '.join(unknown_flags)}",
+              file=sys.stderr)
+        print("  Use --help for usage.", file=sys.stderr)
 
     if cmd == "analyze":
         # analyze cv.md [jobs_new.json] — second positional = jobs path
@@ -659,9 +760,12 @@ def main():
             Path(os.environ.get("LINKEDIN_OUTPUT_DIR",
                  Path.home() / "linkedin-jobs")) / "jobs_new.json")
         cmd_analyze(cv_path, jpath)
-    elif cmd in ("tailor", "prompt"):
+    elif cmd == "tailor":
         cmd_tailor(cv_path, job_id=job_id, jobs_json=jobs_json,
                     job_url=job_url)
+    elif cmd == "prompt":
+        cmd_tailor(cv_path, job_id=job_id, jobs_json=jobs_json,
+                    job_url=job_url, force_keyword=True)
     else:
         print(f"Unknown command: {cmd}", file=sys.stderr)
         print_usage()
