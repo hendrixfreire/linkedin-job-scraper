@@ -12,7 +12,7 @@ Feito pra rodar em cron sem nenhuma infraestrutura — sem banco de dados, sem a
   2. Chaves normalizadas título + empresa (pega vagas repostadas com ID novo)
   3. Lê os outputs anteriores do agente e pula vagas já reportadas
 - **Scoring heurístico** — pré-calcula uma nota de 1-5 estrelas por vaga pra que o LLM só reavalie casos borderline (~80% de economia de tokens)
-- **CV Tailoring** — `tailor_cv.py` analisa compatibilidade entre seu CV e cada vaga, gera CV otimizado por keyword + prompt pra LLM fazer tailoring profundo
+- **CV Tailoring** — `tailor_cv.py` adapta seu CV pra cada vaga. Com `LLM_API_KEY` setada, usa IA pra gerar um CV polido e otimizado (igual ao fluxo de produção). Sem chave, faz análise de keywords gratuita.
 - **Tracking de yield por keyword** — remove automaticamente keywords que não produzem nada após 15+ execuções
 - **Buscas paralelas com rate limiting** — 3 threads, 300ms entre páginas, deadline de 4 minutos
 - **Filtro por localização e senioridade** — apenas Brasil/São Paulo, remove júnior/estágio
@@ -343,70 +343,200 @@ Referência pra customizar `build_searches()`:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## CV Tailoring — Adapte seu Currículo para Cada Vaga
+## Passo 7 — Tailor seu CV para cada vaga
 
-Depois que o scraper encontrar vagas, o `tailor_cv.py` ajuda você a adaptar seu CV para cada uma. Ele analisa a descrição da vaga, extrai as palavras-chave (ferramentas, conceitos, soft skills), compara com o que está no seu CV, e gera uma versão otimizada.
+Uma vez que as vagas começaram a chegar no Telegram, você pode adaptar seu CV para cada vaga interessante usando o `tailor_cv.py`.
 
-### Modos de Uso
+### 7.1 Configurar a chave de API (recomendado)
 
-```bash
-# Analisar compatibilidade contra todas as vagas encontradas
-python3 tailor_cv.py analyze cv.md ~/linkedin-jobs/jobs_new.json
-
-# Gerar CV otimizado para uma vaga específica
-python3 tailor_cv.py tailor cv.md --json ~/linkedin-jobs/jobs_new.json --job-id 4429960220
-
-# Buscar descrição direto do LinkedIn e gerar CV otimizado
-python3 tailor_cv.py tailor cv.md --job-id 4429960220
-
-# Tailoring profundo com IA (gera prompt pra ChatGPT/Claude/Hermes)
-python3 tailor_cv.py tailor cv.md --json ~/linkedin-jobs/jobs_new.json --job-id 4429960220
-# → Abra o arquivo prompt_*.md gerado e cole no seu LLM favorito
-```
-
-### Exemplo de Saída (modo analyze)
-
-```
-======================================================================
-  CV-Job Match Analysis
-  CV: cv.md  |  Jobs: 8 in jobs_new.json
-======================================================================
-
-   1. [ 68%] Senior AI Engineer
-      TechCorp Brasil  |  Seniority: senior+
-      Gaps: airflow, dbt, kubernetes
-
-   2. [ 61%] Data Analytics Manager
-      Retail Analytics SA  |  Seniority: senior+
-      Gaps: airflow, aws, dbt
-
-======================================================================
-  Top 5 matches:
-  [██████░░░░]  68% — Senior AI Engineer @ TechCorp Brasil
-  [██████░░░░]  61% — Data Analytics Manager @ Retail Analytics SA
-======================================================================
-```
-
-### O que o tailor_cv.py faz
-
-- **Extração de keywords** — identifica ferramentas, linguagens, conceitos de dados e soft skills nas descrições das vagas
-- **Matching bilíngue** — funciona com CV em português e vagas em inglês (ex: "liderança" ↔ "leadership")
-- **Match % por categoria** — hard skills (ferramentas + conceitos) e soft skills separados
-- **Gap analysis** — mostra exatamente quais keywords da vaga não aparecem no seu CV
-- **CV otimizado** — reordena experiências por relevância, destaca keywords matching, sinaliza gaps
-- **Prompt LLM** — gera um prompt estruturado que você pode colar no ChatGPT, Claude ou Hermes Agent pra um tailoring mais profundo
-
-### Regras
-
-- **Nunca inventa** skills, experiências ou ferramentas. Só reordena e destaca o que já está no CV.
-- Keywords são sugeridas **apenas** quando há evidência real no CV.
-- Gaps sinalizados honestamente — a decisão de adicionar algo é sempre sua.
-
-### Configuração
+Com uma chave de API, o script chama um LLM diretamente e gera um CV polido, otimizado pra vaga — igual a um escritor de currículo profissional faria.
 
 ```bash
-# Diretório de saída (padrão: ~/linkedin-jobs/tailored/)
-export TAILOR_CV_DIR=~/meus-cvs-tailored
+# Escolha UM dos providers abaixo:
+
+# OpenAI
+export LLM_API_KEY="sk-..."          # Sua chave de API
+
+# OpenRouter (acesso a vários modelos)
+export LLM_API_KEY="sk-or-..."       # Sua chave OpenRouter
+export LLM_API_BASE="https://openrouter.ai/api/v1"
+export LLM_MODEL="openai/gpt-4o-mini"
+
+# Outro provider compatível com OpenAI
+export LLM_API_KEY="sua-chave"
+export LLM_API_BASE="https://seu-endpoint.com/v1"
+export LLM_MODEL="nome-do-modelo"
+```
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `LLM_API_KEY` | _(obrigatório)_ | Chave de API OpenAI-compatível |
+| `LLM_API_BASE` | `https://api.openai.com/v1` | URL base da API (troque pra OpenRouter, Groq, etc.) |
+| `LLM_MODEL` | `gpt-4o-mini` | Modelo a usar (gpt-4o-mini é barato e bom pra CV) |
+
+> 💡 **Sem chave de API?** O script funciona em modo gratuito: faz análise de keywords, mostra gaps e gera um prompt que você pode colar manualmente no ChatGPT ou Claude.
+
+### 7.2 Preparar seu CV
+
+Crie um arquivo markdown com seu currículo (ex: `meu-cv.md`). Use esta estrutura:
+
+```markdown
+# Seu Nome
+
+## Informações de Contato
+- Email: seu@email.com
+- LinkedIn: linkedin.com/in/seu-perfil
+- Localização: Sua Cidade - UF
+
+## Headline / Posicionamento
+Sua área | Skills principais | Diferencial
+
+## Perfil Profissional
+(3-5 linhas descrevendo sua trajetória e especialidades)
+
+## Experiência Profissional
+
+### Cargo Atual
+**EMPRESA** | mês/ano - atual | Cidade
+- Realização 1 com resultado concreto
+- Realização 2 com tecnologia usada
+- Realização 3 com impacto no negócio
+
+### Cargo Anterior
+**EMPRESA** | mês/ano - mês/ano | Cidade
+- ...
+
+## Habilidades
+
+### Habilidades Técnicas
+- Skill 1
+- Skill 2
+
+### Habilidades de Gestão
+- Skill 1
+
+## Ferramentas
+- Ferramenta 1
+- Ferramenta 2
+
+## Formação
+
+### Curso
+**Universidade** | ano - ano
+
+## Idiomas
+- Idioma: Nível
+```
+
+> ⚠️ O script **nunca inventa** experiência. Ele só reordena, destaca e sugere keywords que já estão no seu CV. Gaps são sinalizados honestamente.
+
+### 7.3 Gerar o CV otimizado
+
+Quando uma vaga interessante chegar no Telegram, copie o ID (o número no link `linkedin.com/jobs/view/XXXXX`) e rode:
+
+```bash
+# Com LLM (gera CV polido direto)
+python3 tailor_cv.py meu-cv.md --job-id 4429960220
+
+# Sem LLM (análise gratuita + prompt pra colar no ChatGPT)
+python3 tailor_cv.py meu-cv.md --job-id 4429960220
+```
+
+O script busca a descrição da vaga automaticamente na API do LinkedIn e gera:
+
+| Arquivo | Com LLM | Sem LLM |
+|---|---|---|
+| `cv_NomeVaga_Empresa.md` | ✅ CV pronto, polido, otimizado | — |
+| `prompt_NomeVaga_Empresa.md` | — | ✅ Prompt pra colar no ChatGPT/Claude |
+
+### 7.4 Analisar todas as vagas de uma vez
+
+```bash
+python3 tailor_cv.py analyze meu-cv.md ~/linkedin-jobs/jobs_new.json
+```
+
+Mostra um ranking de compatibilidade com todas as vagas encontradas, com barra de progresso e gaps por vaga. Rápido, gratuito, não precisa de API key.
+
+### 7.5 Fluxo completo (do Telegram ao CV tailorado)
+
+```
+Telegram: "🔍 8 vagas novas — 23/06/2026 15:00"
+         ↓
+     Você lê, acha uma vaga interessante
+         ↓
+     Copia o ID do link (linkedin.com/jobs/view/XXXXX)
+         ↓
+     python3 tailor_cv.py meu-cv.md --job-id XXXXX
+         ↓
+     Script busca descrição, chama LLM, gera CV tailado
+         ↓
+     Abre cv_NomeVaga_Empresa.md, revisa, exporta PDF
+         ↓
+     Candidata-se com CV otimizado pra ESSA vaga
+```
+
+### 7.6 Exemplo de saída
+
+```markdown
+# Seu Nome — Tailored CV
+> **Target:** Senior Data Engineer at TechCorp Brasil
+> **Compatibility:** 68/100
+
+## Professional Profile
+Data engineer with 5+ years building lakehouse architectures...
+
+## Professional Experience
+
+### Data Engineer
+**TechCorp** | 2022 - present
+*Relevance: Direct match for the role's BigQuery + Python requirements*
+- Built ETL pipelines processing 10TB/day using BigQuery and Python...
+```
+
+## Como Funciona
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     SCRAPER (linkedin_jobs.py)               │
+│                                                              │
+│  1. Carrega seen.json (IDs + chaves)                        │
+│  2. Lê últimos 3 outputs do agente (pula vagas reportadas)  │
+│  3. Remove keywords improdutivas                            │
+│  4. Busca na API Guest do LinkedIn (2 páginas × N queries)  │
+│  5. Dedup tripla: ID + título/empresa + reportadas          │
+│  6. Filtra: só Brasil/SP, sem júnior                        │
+│  7. Busca detalhes em paralelo (3 threads, máx 8 vagas)     │
+│  8. Salva: seen.json + keywords.json + jobs_new.json + jobs.md │
+│                                                              │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼ jobs_new.json
+┌─────────────────────────────────────────────────────────────┐
+│                    AGENTE LLM (Hermes cron)                  │
+│                                                              │
+│  1. Lê jobs_new.json                                       │
+│  2. Usa heuristic_score como ponto de partida              │
+│  3. Reavalia casos borderline (2-4 estrelas)               │
+│  4. Filtra pra 3+ estrelas                                 │
+│  5. Ordena por data                                        │
+│  6. Reporta ao usuário (Telegram)                          │
+│  7. Salva resposta como .md em LINKEDIN_CRON_OUTPUT_DIR    │
+│                                                              │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼ próxima execução do scraper lê isso
+                      (volta ao topo)
+
+┌─────────────────────────────────────────────────────────────┐
+│                 CV TAILORING (tailor_cv.py)                  │
+│                                                              │
+│  1. Você vê vaga no Telegram → copia o ID                  │
+│  2. tailor_cv.py busca descrição da vaga                   │
+│  3. Com LLM_API_KEY → chama IA e gera CV polido           │
+│  4. Sem LLM_API_KEY → análise de keywords gratuita        │
+│  5. CV otimizado salvo em tailored/                        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Limitações
