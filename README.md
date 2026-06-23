@@ -435,19 +435,31 @@ Sua área | Skills principais | Diferencial
 Quando uma vaga interessante chegar no Telegram, copie o ID (o número no link `linkedin.com/jobs/view/XXXXX`) e rode:
 
 ```bash
-# Com LLM (gera CV polido direto)
+# ═══ Opção A: com LLM (recomendado) ═══
+# Busca a vaga direto na API do LinkedIn + gera CV com IA
 python3 tailor_cv.py meu-cv.md --job-id 4429960220
 
-# Sem LLM (análise gratuita + prompt pra colar no ChatGPT)
-python3 tailor_cv.py meu-cv.md --job-id 4429960220
+# Ou use o JSON do scraper (já tem título, empresa e descrição)
+python3 tailor_cv.py meu-cv.md --json ~/linkedin-jobs/jobs_new.json --job-id 4429960220
+
+# ═══ Opção B: prompt manual (sem API key) ═══
+# Gera um prompt que você cola no ChatGPT / Claude
+python3 tailor_cv.py prompt meu-cv.md --job-id 4429960220
+
+# ═══ Opção C: colar descrição da vaga ═══
+# Pra vagas de outros sites (Gupy, Glassdoor, etc.)
+python3 tailor_cv.py meu-cv.md --job-url https://exemplo.com/vaga
+# → Cole a descrição e pressione Ctrl+D
 ```
 
-O script busca a descrição da vaga automaticamente na API do LinkedIn e gera:
+O script salva os arquivos em `~/linkedin-jobs/tailored/` (configurável via `TAILOR_CV_DIR`):
 
 | Arquivo | Com LLM | Sem LLM |
 |---|---|---|
 | `cv_NomeVaga_Empresa.md` | ✅ CV pronto, polido, otimizado | — |
 | `prompt_NomeVaga_Empresa.md` | — | ✅ Prompt pra colar no ChatGPT/Claude |
+
+> 💡 **Dica:** depois de gerar o CV, abra o arquivo, revise (o LLM pode ter ajustado o tom ou encurtado demais alguma experiência) e converta pra PDF com o Google Docs, Word ou Pandoc.
 
 ### 7.4 Analisar todas as vagas de uma vez
 
@@ -571,6 +583,33 @@ Data engineer with 5+ years building lakehouse architectures...
 - Verifique: `hermes cron list`
 - Rode manualmente pra testar: `python3 ~/linkedin-job-scraper/linkedin_jobs.py`
 - Cheque os logs: `~/.hermes/cron/output/<job_id>/`
+
+**CV Tailoring: "Failed to fetch job description"**
+- O LinkedIn pode estar bloqueando requests da sua máquina. Espere alguns minutos.
+- Tente com `--json jobs_new.json --job-id <id>` (usa os dados do scraper, não faz request novo).
+- Se o problema persistir, use `--job-url` e cole a descrição manualmente.
+
+**CV Tailoring: LLM não gera CV (vai pro modo keyword)**
+- Verifique se `LLM_API_KEY` está exportada: `echo $LLM_API_KEY`
+- Teste o endpoint manualmente: `curl -s $LLM_API_BASE/chat/completions` (se falhar, sua chave ou URL estão errados)
+- Troque o modelo: `export LLM_MODEL="gpt-4o-mini"` (mais barato e rápido que GPT-4)
+
+**CV Tailoring: "CV file not found"**
+- Certifique-se de que o arquivo markdown do CV existe no caminho especificado.
+- Use caminho absoluto: `python3 tailor_cv.py ~/meu-cv.md --job-id 123`
+- Siga o template da seção 7.2 pra criar seu CV no formato esperado.
+
+## Configuração completa (env vars)
+
+| Variável | Padrão | Usada por |
+|---|---|---|
+| `LLM_API_KEY` | _(obrigatório p/ LLM)_ | `tailor_cv.py` |
+| `LLM_API_BASE` | `https://api.openai.com/v1` | `tailor_cv.py` |
+| `LLM_MODEL` | `gpt-4o-mini` | `tailor_cv.py` |
+| `TAILOR_CV_DIR` | `~/linkedin-jobs/tailored/` | `tailor_cv.py` |
+| `LINKEDIN_OUTPUT_DIR` | `~/linkedin-jobs` | `linkedin_jobs.py`, `linkedin_metrics.py`, `tailor_cv.py` |
+| `LINKEDIN_CRON_OUTPUT_DIR` | _(desativado)_ | `linkedin_jobs.py` |
+| `LINKEDIN_USER_NAME` | `User` | `linkedin_jobs.py` |
 
 ## Contribuindo
 
