@@ -12,6 +12,7 @@ Feito pra rodar em cron sem nenhuma infraestrutura — sem banco de dados, sem a
   2. Chaves normalizadas título + empresa (pega vagas repostadas com ID novo)
   3. Lê os outputs anteriores do agente e pula vagas já reportadas
 - **Scoring heurístico** — pré-calcula uma nota de 1-5 estrelas por vaga pra que o LLM só reavalie casos borderline (~80% de economia de tokens)
+- **CV Tailoring** — `tailor_cv.py` analisa compatibilidade entre seu CV e cada vaga, gera CV otimizado por keyword + prompt pra LLM fazer tailoring profundo
 - **Tracking de yield por keyword** — remove automaticamente keywords que não produzem nada após 15+ execuções
 - **Buscas paralelas com rate limiting** — 3 threads, 300ms entre páginas, deadline de 4 minutos
 - **Filtro por localização e senioridade** — apenas Brasil/São Paulo, remove júnior/estágio
