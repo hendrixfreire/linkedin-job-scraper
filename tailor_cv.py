@@ -321,7 +321,7 @@ def call_llm(system_prompt, user_prompt, max_tokens=3000):
     })
 
     try:
-        with urlopen(req, timeout=120) as resp:
+        with urlopen(req, timeout=180) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             if "choices" not in result:
                 error_msg = result.get("error", {}).get("message", str(result))
@@ -519,7 +519,13 @@ def cmd_tailor(cv_path, job_id=None, jobs_json=None, job_url=None,
     Set force_keyword=True to skip LLM even when API key is set
     (used by the 'prompt' command).
     """
-    cv_text = Path(cv_path).read_text()
+    try:
+        cv_text = Path(cv_path).read_text()
+    except FileNotFoundError:
+        print(f"Error: CV file not found: {cv_path}", file=sys.stderr)
+        print("  Create a markdown file with your CV first.", file=sys.stderr)
+        print("  See README for the recommended CV template.", file=sys.stderr)
+        sys.exit(1)
 
     # --- Resolve job description ---
     job_title = "Unknown Role"
@@ -627,7 +633,12 @@ def cmd_tailor(cv_path, job_id=None, jobs_json=None, job_url=None,
 
 def cmd_analyze(cv_path, jobs_path):
     """Analyze CV against all jobs in jobs_new.json."""
-    cv_text = Path(cv_path).read_text()
+    try:
+        cv_text = Path(cv_path).read_text()
+    except FileNotFoundError:
+        print(f"Error: CV file not found: {cv_path}", file=sys.stderr)
+        print("  Create a markdown file with your CV first.", file=sys.stderr)
+        sys.exit(1)
     cv_keywords = extract_cv_keywords(cv_text)
 
     jobs = load_jobs_json(jobs_path)
