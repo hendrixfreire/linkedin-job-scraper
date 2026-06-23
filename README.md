@@ -328,6 +328,84 @@ Referência pra customizar `build_searches()`:
                            │
                            ▼ próxima execução do scraper lê isso
                       (volta ao topo)
+
+┌─────────────────────────────────────────────────────────────┐
+│                 CV TAILORING (tailor_cv.py)                  │
+│                                                              │
+│  1. Lê seu CV (markdown) + jobs_new.json                   │
+│  2. Extrai keywords de cada vaga (tools, conceitos, soft)  │
+│  3. Compara com seu CV — match % por hard/soft skills      │
+│  4. Modo analyze: mostra compatibilidade de todas as vagas │
+│  5. Modo tailor: gera CV otimizado pra uma vaga específica │
+│  6. Gera prompt LLM pra tailoring profundo com IA          │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## CV Tailoring — Adapte seu Currículo para Cada Vaga
+
+Depois que o scraper encontrar vagas, o `tailor_cv.py` ajuda você a adaptar seu CV para cada uma. Ele analisa a descrição da vaga, extrai as palavras-chave (ferramentas, conceitos, soft skills), compara com o que está no seu CV, e gera uma versão otimizada.
+
+### Modos de Uso
+
+```bash
+# Analisar compatibilidade contra todas as vagas encontradas
+python3 tailor_cv.py analyze cv.md ~/linkedin-jobs/jobs_new.json
+
+# Gerar CV otimizado para uma vaga específica
+python3 tailor_cv.py tailor cv.md --json ~/linkedin-jobs/jobs_new.json --job-id 4429960220
+
+# Buscar descrição direto do LinkedIn e gerar CV otimizado
+python3 tailor_cv.py tailor cv.md --job-id 4429960220
+
+# Tailoring profundo com IA (gera prompt pra ChatGPT/Claude/Hermes)
+python3 tailor_cv.py tailor cv.md --json ~/linkedin-jobs/jobs_new.json --job-id 4429960220
+# → Abra o arquivo prompt_*.md gerado e cole no seu LLM favorito
+```
+
+### Exemplo de Saída (modo analyze)
+
+```
+======================================================================
+  CV-Job Match Analysis
+  CV: cv.md  |  Jobs: 8 in jobs_new.json
+======================================================================
+
+   1. [ 68%] Senior AI Engineer
+      TechCorp Brasil  |  Seniority: senior+
+      Gaps: airflow, dbt, kubernetes
+
+   2. [ 61%] Data Analytics Manager
+      Retail Analytics SA  |  Seniority: senior+
+      Gaps: airflow, aws, dbt
+
+======================================================================
+  Top 5 matches:
+  [██████░░░░]  68% — Senior AI Engineer @ TechCorp Brasil
+  [██████░░░░]  61% — Data Analytics Manager @ Retail Analytics SA
+======================================================================
+```
+
+### O que o tailor_cv.py faz
+
+- **Extração de keywords** — identifica ferramentas, linguagens, conceitos de dados e soft skills nas descrições das vagas
+- **Matching bilíngue** — funciona com CV em português e vagas em inglês (ex: "liderança" ↔ "leadership")
+- **Match % por categoria** — hard skills (ferramentas + conceitos) e soft skills separados
+- **Gap analysis** — mostra exatamente quais keywords da vaga não aparecem no seu CV
+- **CV otimizado** — reordena experiências por relevância, destaca keywords matching, sinaliza gaps
+- **Prompt LLM** — gera um prompt estruturado que você pode colar no ChatGPT, Claude ou Hermes Agent pra um tailoring mais profundo
+
+### Regras
+
+- **Nunca inventa** skills, experiências ou ferramentas. Só reordena e destaca o que já está no CV.
+- Keywords são sugeridas **apenas** quando há evidência real no CV.
+- Gaps sinalizados honestamente — a decisão de adicionar algo é sempre sua.
+
+### Configuração
+
+```bash
+# Diretório de saída (padrão: ~/linkedin-jobs/tailored/)
+export TAILOR_CV_DIR=~/meus-cvs-tailored
 ```
 
 ## Limitações
