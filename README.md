@@ -7,15 +7,18 @@ Feito pra rodar em cron sem nenhuma infraestrutura — sem banco de dados, sem a
 ## Funcionalidades
 
 - **Sem autenticação** — usa a API pública Guest do LinkedIn (scraping de HTML)
-- **Deduplicação tripla**:
+- **Deduplicação quádrupla**:
   1. IDs persistentes das vagas (`seen.json`)
   2. Chaves normalizadas título + empresa (pega vagas repostadas com ID novo)
   3. Lê os outputs anteriores do agente e pula vagas já reportadas
+  4. Dedup intra-batch — mesma vaga com IDs diferentes no mesmo run é colapsada
 - **Scoring heurístico** — pré-calcula uma nota de 1-5 estrelas por vaga pra que o LLM só reavalie casos borderline (~80% de economia de tokens)
 - **CV Tailoring** — `tailor_cv.py` adapta seu CV pra cada vaga. Com `LLM_API_KEY` setada, usa IA pra gerar um CV polido e otimizado (igual ao fluxo de produção). Sem chave, faz análise de keywords gratuita.
 - **Tracking de yield por keyword** — remove automaticamente keywords que não produzem nada após 15+ execuções
 - **Buscas paralelas com rate limiting** — 3 threads, 300ms entre páginas, deadline de 4 minutos
 - **Filtro por localização e senioridade** — apenas Brasil/São Paulo, remove júnior/estágio
+- **Blocklist de empresas** — filtra agências de staffing/spam que postam vagas genéricas em volume (configurável via `LINKEDIN_COMPANY_BLOCKLIST`)
+- **Marcação completa de vagas vistas** — todas as vagas filtradas são lembradas, não só as detalhadas (evita repetição entre runs)
 - **Dashboard de métricas** — vê yield por keyword, execuções recentes, tamanho da base
 - **Skill de setup guiado** — entrevista o usuário e configura tudo automaticamente
 
@@ -214,6 +217,7 @@ Se prefere configurar manualmente sem usar a skill, tudo é via variáveis de am
 | `LINKEDIN_OUTPUT_DIR` | `~/linkedin-jobs` | Onde salvar os arquivos de saída |
 | `LINKEDIN_USER_NAME` | `User` | Nome no cabeçalho do jobs.md |
 | `LINKEDIN_CRON_OUTPUT_DIR` | _(desativado)_ | Diretório com os `.md` de resposta do agente (ativa dedup entre runs) |
+| `LINKEDIN_COMPANY_BLOCKLIST` | `jobgether,bairesdev,tata consultancy,fullstack,indi staffing` | Lista separada por vírgulas de empresas a bloquear (match por substring case-insensitive). Vazio (`""`) desativa o filtro. |
 
 Edite `linkedin_jobs.py` diretamente pra mudar keywords, filtros e heuristic_score.
 
@@ -306,10 +310,10 @@ Referência pra customizar `build_searches()`:
 │  2. Lê últimos 3 outputs do agente (pula vagas reportadas)  │
 │  3. Remove keywords improdutivas                            │
 │  4. Busca na API Guest do LinkedIn (2 páginas × N queries)  │
-│  5. Dedup tripla: ID + título/empresa + reportadas          │
-│  6. Filtra: só Brasil/SP, sem júnior                        │
+│  5. Dedup quádrupla: ID + título/empresa + reportadas + intra-batch │
+│  6. Filtra: só Brasil/SP, sem júnior, sem empresas na blocklist │
 │  7. Busca detalhes em paralelo (3 threads, máx 8 vagas)     │
-│  8. Salva: seen.json + keywords.json + jobs_new.json + jobs.md │
+│  8. Salva: seen.json (TODAS filtradas) + keywords.json + jobs_new.json + jobs.md │
 │                                                              │
 └──────────────────────────┬──────────────────────────────────┘
                            │
@@ -572,7 +576,10 @@ Data engineer with 5+ years building lakehouse architectures...
 
 **Vagas duplicadas aparecendo**
 - Certifique-se de que `LINKEDIN_CRON_OUTPUT_DIR` está definido se você usa um agente. Sem isso, o scraper não sabe o que já foi reportado.
-- Verifique se o formato da resposta do agente bate com `**N. ⭐⭐⭐ Título da Vaga**` (o regex espera estrelas).
+- Verifique se o formato da resposta do agente bate com `**N. ⭐⭐⭐ Título da Vaga**` (o regex espera estrelas). O scraper suporta tanto o formato individual quanto o agrupado (`**N. ⭐⭐⭐ Título** — N similares` com bullets `• Empresa — ...`).
+- Vagas repetidas com o **mesmo ID** entre runs: isso era um bug em versões antigas (só as 8 vagas detalhadas eram marcadas como vistas). Atualize para a versão atual, que marca todas as vagas filtradas.
+- Vagas repetidas com **IDs diferentes** no mesmo run: o dedup intra-batch agora colapsa essas duplicatas automaticamente.
+- Muitas vagas de agências de staffing (Jobgether, BairesDev, Tata): ajuste `LINKEDIN_COMPANY_BLOCKLIST` pra filtrar essas empresas.
 
 **Bot do Telegram não responde**
 - Verifique o token: `hermes gateway` deve mostrar logs sem erro

@@ -57,6 +57,16 @@ KEYWORDS_FILE = BASE_DIR / "keywords.json"
 # Enables dedup of jobs already reported to the user across runs
 CRON_OUTPUT_DIR = Path(os.environ["LINKEDIN_CRON_OUTPUT_DIR"]) if os.environ.get("LINKEDIN_CRON_OUTPUT_DIR") else None
 
+# Optional: comma-separated list of companies to block (staffing agencies, spam).
+# Match is case-insensitive by SUBSTRING (e.g. "tata consultancy" matches
+# "Tata Consultancy Services"). Defaults to a few known high-volume agencies.
+# Override with LINKEDIN_COMPANY_BLOCKLIST="company a,company b"
+_DEFAULT_BLOCKLIST = "jobgether,bairesdev,tata consultancy,fullstack,indi staffing"
+COMPANY_BLOCKLIST = [
+    c.strip().lower() for c in os.environ.get("LINKEDIN_COMPANY_BLOCKLIST", _DEFAULT_BLOCKLIST).split(",")
+    if c.strip()
+]
+
 BASE_SEARCH_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 BASE_JOB_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}"
 
@@ -413,8 +423,21 @@ def load_recently_reported(max_files=6):
     Requires LINKEDIN_CRON_OUTPUT_DIR env var to be set. If not set,
     returns empty set (feature disabled).
 
-    Regex looks for '**N. ⭐⭐⭐ Title**' in the agent's markdown response,
-    then extracts the company from the following line (format: 'Company | Location | ...').
+    Supports TWO agent output formats:
+
+    Individual format (legacy):
+      **1. ⭐⭐⭐ Title**
+      Company | Location | Mode
+      📅 ... | [View job](url)
+
+    Grouped format (when 2+ jobs share the same title):
+      **1. ⭐⭐⭐ Title** — N similar jobs
+      • Company A — Location | 📅 ... | [View job](url1)
+      • Company B — Location | 📅 ... | [View job](url2)
+
+    Strategy: capture the title from the header (**N. ⭐+ ...**) then look for
+    a company in ANY following line (up to the next header), accepting both
+    pipe and bullet formats. Company is the first token before | or —.
 
     Filters out template placeholders ('job title' etc.).
     """
@@ -425,24 +448,55 @@ def load_recently_reported(max_files=6):
     for f in files:
         try:
             content = f.read_text()
-            # Pattern: **N. ⭐** or **N. ⭐⭐** in the response markdown
-            for m in re.finditer(r'\*\d+\.\s*⭐+\s+(?:🔥\s+)?(.+?)\*\*', content):
+            # Capture each job header: **N. ⭐+ (🔥 )?Title** [— ...]
+            header_re = re.compile(r'\*\*\d+\.\s*⭐+\s+(?:🔥\s+)?(.+?)\*\*')
+            headers = list(header_re.finditer(content))
+            for i, m in enumerate(headers):
                 title = m.group(1).strip()
-                # Extract company: look for lines after the title containing pipe |
-                # Agent format is: Company | Location | Mode
-                idx = m.end()
-                after = content[idx:idx+500]
-                lines = [l.strip() for l in after.split('\n') if l.strip()]
-                company = ''
-                for line in lines[:3]:
-                    if '|' in line:
-                        company = line.split('|')[0].strip()
-                        break
-                # Skip template placeholders
+                # Remove " — N similar jobs" suffix from grouped format
+                title = re.split(r'\s*[–—]\s*\d+\s*(?:similar|jobs?)?', title)[0].strip()
                 placeholders = ("título da vaga", "titulo da vaga", "título",
                                 "job title", "title")
-                if title and company and title.lower() not in placeholders:
-                    reported.add(normalize_key(title, company))
+                if title.lower() in placeholders:
+                    continue
+                # Text window until the next header (or +800 chars)
+                start = m.end()
+                end = headers[i+1].start() if i+1 < len(headers) else start + 800
+                window = content[start:end]
+                # Look for a company in each non-empty line of the window.
+                # Accepts: "Company | ..." or "• Company — ..." or "• Company | ..."
+                for line in window.split('\n'):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Skip date lines (start with 📅) and link lines (start with [)
+                    if line.startswith('📅') or line.startswith('['):
+                        continue
+                    # Remove leading bullet
+                    candidate = re.sub(r'^[•\-\*]\s*', '', line)
+                    # Split on first | or — and take the first piece
+                    parts = re.split(r'\s*[|–—]\s*', candidate, maxsplit=1)
+                    company = parts[0].strip()
+                    # Clean emojis and residual markdown
+                    company = re.sub(r'[📅🔥⭐]+', '', company).strip()
+                    company = re.sub(r'^[\W]+', '', company).strip()
+                    # Skip placeholders, date text, URLs, and prompt footer
+                    low = company.lower()
+                    if (company
+                            and len(company) <= 60  # company names don't exceed 60 chars
+                            and low not in ("empresa", "company", "ver vaga", "view job", "ver no link")
+                            and not low.startswith("postada")
+                            and not low.startswith("posted")
+                            and not low.startswith("http")
+                            and not low.startswith("quer")  # footer "want me to tailor..."
+                            and not low.startswith("want")
+                            and not company.startswith('[')
+                            and not company.startswith('http')):
+                        reported.add(normalize_key(title, company))
+                        # In grouped format, each bullet is a different company
+                        # — continue to collect all. In individual format, the
+                        # first line with | is the company, and following lines
+                        # (📅, link) don't have a valid leading pipe → no noise.
         except Exception:
             continue  # corrupted or inaccessible file → skip
     return reported
@@ -734,16 +788,36 @@ def main():
             skipped_reported += 1
             continue
         new_jobs.append(j)
-    print(f"Dedup: {skipped_ids} IDs + {skipped_keys} title+company + {skipped_reported} reported", file=sys.stderr)
+
+    # Intra-batch dedup: the API can return the same job with different IDs
+    # (same company+title reposted). Keep only the first occurrence per
+    # title||company within this run — avoids reporting identical jobs twice.
+    batch_keys = set()
+    deduped_jobs = []
+    skipped_batch = 0
+    for j in new_jobs:
+        key = j.get("_key") or normalize_key(j.get("title", ""), j.get("company", ""))
+        if key in batch_keys:
+            skipped_batch += 1
+            continue
+        batch_keys.add(key)
+        deduped_jobs.append(j)
+    new_jobs = deduped_jobs
+    if skipped_batch:
+        print(f"Intra-batch dedup: {skipped_batch} duplicates removed in same run", file=sys.stderr)
+
+    print(f"Dedup: {skipped_ids} IDs + {skipped_keys} title+company + {skipped_reported} reported + {skipped_batch} intra-batch", file=sys.stderr)
     print(f"New jobs: {len(new_jobs)}", file=sys.stderr)
 
-    # ═══ STEP 6: FILTER BY LOCATION AND LEVEL ═══
-    # Drop junior/intern jobs and jobs outside Brazil/São Paulo.
-    # This filter is local (doesn't require API detail fetch).
+    # ═══ STEP 6: FILTER BY LOCATION, LEVEL, AND COMPANY ═══
+    # Drop junior/intern jobs, jobs outside Brazil/São Paulo, and
+    # companies in the blocklist (staffing/spam). Local filter (no API detail).
     filtered = []
+    skipped_company = 0
     for job in new_jobs:
         loc = job.get("location", "").lower()
         title = job.get("title", "").lower()
+        company = job.get("company", "").lower()
 
         # Exclude junior/intern/trainee jobs
         skip = False
@@ -759,9 +833,16 @@ def main():
         if not is_brazil:
             continue
 
+        # Exclude companies in the blocklist (case-insensitive substring match)
+        if any(block in company for block in COMPANY_BLOCKLIST):
+            skipped_company += 1
+            continue
+
         filtered.append(job)
 
-    print(f"After location+level filter: {len(filtered)}", file=sys.stderr)
+    if skipped_company:
+        print(f"Blocked companies filtered: {skipped_company}", file=sys.stderr)
+    print(f"After location+level+company filter: {len(filtered)}", file=sys.stderr)
 
     if not filtered:
         # Even with no jobs, save keyword stats (all ran)
@@ -826,15 +907,25 @@ def main():
 
     # ═══ STEP 8: SAVE STATE AND GENERATE OUTPUTS ═══
 
-    # --- 8a. Update SEEN_JSON with IDs and keys of enriched jobs ---
+    # --- 8a. Update SEEN_JSON with IDs and keys ---
+    # IMPORTANT: mark ALL filtered jobs as seen, not just the enriched ones.
+    # Previously only the 8 detailed jobs (MAX_DETAIL) were marked — the ones
+    # left out reappeared on the next run with the same ID (main repeat bug).
+    # Now: enriched (detailed) get id+key; filtered-but-not-detailed get key
+    # only (no details, but title+company is enough for future dedup).
     new_ids_to_mark = set()
     new_keys_to_mark = set()
     for job, details in enriched:
         new_ids_to_mark.add(job["id"])
         new_keys_to_mark.add(job.get("_key") or normalize_key(job.get("title", ""), job.get("company", "")))
+    # Filtered jobs not detailed (above MAX_DETAIL) — mark the key
+    enriched_ids = {job["id"] for job, _ in enriched}
+    for job in filtered:
+        if job["id"] not in enriched_ids:
+            new_keys_to_mark.add(job.get("_key") or normalize_key(job.get("title", ""), job.get("company", "")))
 
     save_full_state(seen_ids, seen_keys, new_ids_to_mark, new_keys_to_mark)
-    print(f"SEEN_JSON updated: +{len(new_ids_to_mark)} IDs, +{len(new_keys_to_mark)} keys", file=sys.stderr)
+    print(f"SEEN_JSON updated: +{len(new_ids_to_mark)} IDs, +{len(new_keys_to_mark)} keys ({len(filtered)-len(enriched)} filtered-not-detailed marked by key)", file=sys.stderr)
 
     # --- 8b. Update keyword stats with this run's yield ---
     kw_yield = {}
