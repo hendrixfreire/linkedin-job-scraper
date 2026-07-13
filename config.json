@@ -1,0 +1,15 @@
+{
+  "source_json": "/Users/hendrixfreire/Projetos/vagas_linkedin_new.json",
+  "database": "data/candidaturas.db",
+  "profile": "data/profile.json",
+  "run_control": "data/run_control.json",
+  "screenshot_dir": "reports/screenshots",
+  "browser_profile": "data/browser-profile",
+  "browser_enabled": false,
+  "headless": true,
+  "auto_submit": false,
+  "allowed_ats": ["greenhouse", "lever", "ashby"],
+  "min_fit_score": 70,
+  "daily_limit": 10,
+  "dashboard_port": 8765
+}
