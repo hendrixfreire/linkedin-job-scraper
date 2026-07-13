@@ -9,7 +9,7 @@
   "headless": true,
   "auto_submit": false,
   "allowed_ats": ["greenhouse", "lever", "ashby"],
-  "min_fit_score": 70,
+  "min_fit_score": 75,
   "daily_limit": 10,
   "dashboard_port": 8765
 }

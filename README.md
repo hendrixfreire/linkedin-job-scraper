@@ -38,6 +38,12 @@ O sistema não digita senhas, não resolve CAPTCHA/2FA e não inventa respostas 
 
 Dashboard: `http://127.0.0.1:8765`
 
+## Comece por aqui
+
+- Mapa completo de arquivos, dados e automações: [`docs/COMO-FUNCIONA.md`](docs/COMO-FUNCIONA.md)
+- Diagrama visual da arquitetura: [`docs/arquitetura.html`](docs/arquitetura.html)
+- Resumo operacional sem expor dados pessoais: `./scripts/status.sh`
+
 ## Estrutura
 
 ```text
