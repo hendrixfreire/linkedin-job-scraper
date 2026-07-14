@@ -1,6 +1,6 @@
 # Como funciona o Candidatura Agent
 
-> Documento de orientação operacional. Última verificação: 13/07/2026.
+> Documento de orientação operacional. Última verificação: 14/07/2026.
 
 ## Resumo em uma frase
 
@@ -163,8 +163,10 @@ data/candidaturas.db
 |---|---:|---|---|
 | `linkedin-job-search` | 08:00, 13:00 e 18:00 | Telegram Home | Ativa |
 | `candidatura-hourly` | de hora em hora, 08:30–18:30 | Local | Ativa |
+| `candidatura-asset-prep` | de hora em hora, 08:45–18:45 | Local | Ativa |
 | `candidatura-daily-report` | 20:15 | Esta conversa | Ativa |
 | Dashboard via `launchd` | contínuo | localhost:8765 | Rodando |
+
 
 Há duas rotinas que consultam o scraper: a antiga envia vagas ao Telegram e a nova alimenta o banco do agente. Elas estão separadas deliberadamente durante a calibração.
 
@@ -174,7 +176,13 @@ Há duas rotinas que consultam o scraper: a antiga envia vagas ao Telegram e a n
 - ingestão no SQLite;
 - score e filtros;
 - fila de qualificadas;
+- enriquecimento das descrições do LinkedIn;
+- resolução conservadora de URL oficial/ATS, com cooldown quando não há evidência;
+- geração e validação de um CV específico por execução horária;
 - dashboard e relatório diário;
+- navegador Brave em `dry_run`, com Chrome como fallback;
+- lock contra execuções horárias concorrentes;
+- evidência visual antes do envio e, quando o envio for liberado, depois do clique;
 - meta mínima de dez candidaturas por dia, sem teto diário;
 - processamento de zero, uma ou várias vagas prontas em cada execução horária;
 - notificação individual no Discord após cada envio confirmado;
@@ -183,18 +191,21 @@ Há duas rotinas que consultam o scraper: a antiga envia vagas ao Telegram e a n
 
 ## O que ainda NÃO é automático
 
-- gerar CVs personalizados para todas as vagas da fila sem uma execução do agente;
-- resolver todas as URLs externas do LinkedIn;
-- preencher Lever e Ashby com validação real;
-- enviar candidatura.
+- resolver URLs que não aparecem em página oficial ou ATS indexado;
+- responder perguntas legais, sensíveis ou factuais ainda não aprovadas;
+- superar login expirado, CAPTCHA ou 2FA sem participação humana;
+- enviar candidatura: `auto_submit` permanece desligado;
+- liberar ATS além do Greenhouse para envio real; os demais estão disponíveis apenas para `dry_run`.
 
 Configuração de segurança atual:
 
 ```json
 {
   "daily_target_min": 10,
-  "browser_enabled": false,
+  "browser_enabled": true,
   "auto_submit": false,
+  "allowed_ats": ["greenhouse"],
+  "dry_run_allowed_ats": ["greenhouse", "lever", "ashby", "gupy", "peopleforce", "factorial"],
   "notification_target": "discord:1526233025346666617:1526233025346666617"
 }
 ```
@@ -222,19 +233,18 @@ Link da vaga: <URL externa>
 Origem: <URL do LinkedIn, quando diferente>
 ```
 
-Portanto, o cron horário busca e classifica, mas ainda não dispara candidaturas porque os dois gates continuam desligados. A simulação Wellhub foi uma execução controlada separada.
+Portanto, o cron horário já prepara ativos e executa simulações seguras; candidaturas reais continuam bloqueadas porque `auto_submit=false` e somente Greenhouse está na allowlist de envio.
 
-## Estado verificado em 13/07/2026
+## Estado verificado em 14/07/2026
 
 ```text
-47 vagas no banco
-37 rejeitadas
-9 qualificadas aguardando preparação
-1 simulação concluída (Wellhub / Greenhouse)
-0 candidaturas enviadas
-0 feedbacks registrados
-222 eventos de auditoria
-21 testes passando
+99 vagas no banco
+74 rejeitadas
+20 qualificadas aguardando preparação
+2 dry-runs concluídos
+2 submissões controladas já registradas
+40 testes passando
+Dashboard HTTP 200
 ```
 
 ## Comandos para não se perder

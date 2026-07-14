@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from candidatura_agent.hourly import _browser_candidates, _profile_for_job, run_pipeline
+from candidatura_agent.hourly import (
+    _allowed_ats_for_run, _browser_candidates, _profile_for_job, run_pipeline,
+)
 
 
 def test_browser_candidates_prioritize_brave_then_chrome_then_bundled():
@@ -10,6 +12,17 @@ def test_browser_candidates_prioritize_brave_then_chrome_then_bundled():
         ("chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
         ("chromium", None),
     ]
+
+
+def test_dry_run_can_probe_more_ats_without_expanding_submit_allowlist():
+    config = {
+        "allowed_ats": ["greenhouse"],
+        "dry_run_allowed_ats": ["greenhouse", "factorial", "gupy", "peopleforce"],
+    }
+    assert _allowed_ats_for_run(config, auto_submit=False) == {
+        "greenhouse", "factorial", "gupy", "peopleforce",
+    }
+    assert _allowed_ats_for_run(config, auto_submit=True) == {"greenhouse"}
 
 
 def test_profile_for_job_uses_tailored_resume_when_required():

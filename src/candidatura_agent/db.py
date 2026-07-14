@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     source_url TEXT NOT NULL UNIQUE,
     apply_url TEXT,
     resume_path TEXT,
+    resolution_source TEXT,
+    resolved_at TEXT,
+    resolution_attempts INTEGER NOT NULL DEFAULT 0,
+    resolution_last_error TEXT,
+    resolution_retry_at TEXT,
     description TEXT NOT NULL DEFAULT '',
     ats TEXT,
     source_score INTEGER NOT NULL DEFAULT 0,
@@ -93,6 +98,16 @@ class Database:
                 conn.execute("ALTER TABLE jobs ADD COLUMN source_score INTEGER NOT NULL DEFAULT 0")
             if "resume_path" not in columns:
                 conn.execute("ALTER TABLE jobs ADD COLUMN resume_path TEXT")
+            if "resolution_source" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN resolution_source TEXT")
+            if "resolved_at" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN resolved_at TEXT")
+            if "resolution_attempts" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN resolution_attempts INTEGER NOT NULL DEFAULT 0")
+            if "resolution_last_error" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN resolution_last_error TEXT")
+            if "resolution_retry_at" not in columns:
+                conn.execute("ALTER TABLE jobs ADD COLUMN resolution_retry_at TEXT")
 
     def upsert_job(self, job: dict[str, Any]) -> int:
         source_url = job.get("source_url") or job.get("url")
@@ -159,6 +174,82 @@ class Database:
                 (limit,),
             )
             return [dict(row) for row in rows]
+
+    def asset_queue(self, limit: int = 10) -> list[dict[str, Any]]:
+        """Lista vagas qualificadas que ainda precisam de URL ou CV."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT j.*,
+                    CASE WHEN j.apply_url IS NULL THEN 'resolve' ELSE 'resume' END AS asset_stage
+                FROM jobs j LEFT JOIN applications a ON a.job_id=j.id
+                WHERE j.status='qualified' AND a.id IS NULL
+                  AND (j.apply_url IS NULL OR j.resume_path IS NULL)
+                  AND (j.resolution_retry_at IS NULL OR j.resolution_retry_at <= datetime('now','localtime'))
+                ORDER BY j.fit_score DESC,
+                  CASE WHEN j.apply_url IS NULL THEN 0 ELSE 1 END,
+                  j.created_at ASC LIMIT ?""",
+                (limit,),
+            )
+            return [dict(row) for row in rows]
+
+    def mark_resolution_failed(self, job_id: int, error: str, retry_hours: int = 24) -> None:
+        """Adia nova busca de URL sem bloquear o restante da fila."""
+        modifier = f"+{max(1, int(retry_hours))} hours"
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE jobs SET resolution_attempts=resolution_attempts+1,
+                resolution_last_error=?,resolution_retry_at=datetime('now','localtime',?),
+                updated_at=datetime('now','localtime') WHERE id=?""",
+                (error[:500], modifier, job_id),
+            )
+            conn.execute(
+                "INSERT INTO events(job_id,kind,payload) VALUES (?,?,?)",
+                (job_id, "apply_url_resolution_failed", json.dumps({
+                    "error": error[:500], "retry_hours": max(1, int(retry_hours)),
+                }, ensure_ascii=False)),
+            )
+
+    def update_job_description(self, job_id: int, description: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE jobs SET description=?,updated_at=datetime('now','localtime') WHERE id=?",
+                (description, job_id),
+            )
+            conn.execute(
+                "INSERT INTO events(job_id,kind,payload) VALUES (?,?,?)",
+                (job_id, "description_enriched", json.dumps({"characters": len(description)})),
+            )
+
+    def set_job_resolution(
+        self, job_id: int, *, apply_url: str, ats: str,
+        company: str | None = None, resolution_source: str,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE jobs SET apply_url=?,ats=?,company=COALESCE(?,company),
+                resolution_source=?,resolved_at=datetime('now','localtime'),
+                resolution_last_error=NULL,resolution_retry_at=NULL,
+                updated_at=datetime('now','localtime') WHERE id=?""",
+                (apply_url, ats, company, resolution_source, job_id),
+            )
+            conn.execute(
+                "INSERT INTO events(job_id,kind,payload) VALUES (?,?,?)",
+                (job_id, "apply_url_resolved", json.dumps({
+                    "apply_url": apply_url, "ats": ats, "company": company,
+                    "source": resolution_source,
+                }, ensure_ascii=False)),
+            )
+
+    def set_job_resume(self, job_id: int, resume_path: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE jobs SET resume_path=?,updated_at=datetime('now','localtime') WHERE id=?",
+                (resume_path, job_id),
+            )
+            conn.execute(
+                "INSERT INTO events(job_id,kind,payload) VALUES (?,?,?)",
+                (job_id, "resume_prepared", json.dumps({"resume_path": resume_path}, ensure_ascii=False)),
+            )
 
     def set_job_assets(
         self, job_id: int, *, apply_url: str, ats: str, resume_path: str,

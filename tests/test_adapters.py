@@ -7,6 +7,7 @@ def test_detects_supported_ats_domains():
     assert detect_ats("https://jobs.ashbyhq.com/acme/abc") == "ashby"
     assert detect_ats("https://acme.wd5.myworkdayjobs.com/job") == "workday"
     assert detect_ats("https://portal.gupy.io/job/123") == "gupy"
+    assert detect_ats("https://dadoteca.factorialhr.com.br/job_posting/123") == "factorial"
 
 
 def test_sensitive_or_unknown_fields_block():

@@ -178,22 +178,24 @@ def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit
 
     shot_dir = Path(screenshot_dir)
     shot_dir.mkdir(parents=True, exist_ok=True)
-    shot = shot_dir / "last-application.png"
-    page.screenshot(path=str(shot), full_page=True)
+    pre_shot = shot_dir / "last-application-pre-submit.png"
+    page.screenshot(path=str(pre_shot), full_page=True)
 
     if blockers:
-        return ApplicationResult("blocked", ats, page.url, blockers, fill.filled, str(shot))
+        return ApplicationResult("blocked", ats, page.url, blockers, fill.filled, str(pre_shot))
     if not auto_submit:
-        return ApplicationResult("dry_run", ats, page.url, [], fill.filled, str(shot))
+        return ApplicationResult("dry_run", ats, page.url, [], fill.filled, str(pre_shot))
 
     submit = page.get_by_role("button", name=re.compile(r"submit|send|enviar|candidatar|apply", re.I))
     if submit.count() != 1:
-        return ApplicationResult("blocked", ats, page.url, ["botão de envio ambíguo"], fill.filled, str(shot))
+        return ApplicationResult("blocked", ats, page.url, ["botão de envio ambíguo"], fill.filled, str(pre_shot))
     submit.click()
     page.wait_for_timeout(1500)
+    post_shot = shot_dir / "last-application-post-submit.png"
+    page.screenshot(path=str(post_shot), full_page=True)
     if not has_submission_confirmation(page):
         return ApplicationResult(
             "blocked", ats, page.url, ["envio sem confirmação verificável"],
-            fill.filled, str(shot),
+            fill.filled, str(post_shot),
         )
-    return ApplicationResult("submitted", ats, page.url, [], fill.filled, str(shot))
+    return ApplicationResult("submitted", ats, page.url, [], fill.filled, str(post_shot))

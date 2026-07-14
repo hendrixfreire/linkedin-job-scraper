@@ -25,6 +25,10 @@ def detect_ats(url: str) -> str:
         return "workday"
     if "gupy.io" in host:
         return "gupy"
+    if "peopleforce.io" in host or "peopleforce.com" in host:
+        return "peopleforce"
+    if "factorialhr.com" in host or "factorialhr.com.br" in host:
+        return "factorial"
     return "generic"
 
 

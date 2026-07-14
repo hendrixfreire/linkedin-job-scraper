@@ -11,6 +11,7 @@ from .browser import run_application
 from .db import Database
 from .ingest import ingest_linkedin_json
 from .policy import assess_job
+from .run_lock import exclusive_run_lock
 
 
 def _resolve(root: Path, value: str) -> Path:
@@ -28,6 +29,14 @@ def _browser_candidates(config: dict[str, Any]) -> list[tuple[str, str | None]]:
         ("chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
         ("chromium", None),
     ]
+
+
+def _allowed_ats_for_run(config: dict[str, Any], *, auto_submit: bool) -> set[str]:
+    key = "allowed_ats" if auto_submit else "dry_run_allowed_ats"
+    values = config.get(key)
+    if values is None:
+        values = config.get("allowed_ats", [])
+    return set(values)
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -106,11 +115,15 @@ def run_pipeline(config: dict[str, Any], root: Path) -> dict[str, Any]:
                     job_profile = _profile_for_job(profile, job)
                     if job_profile is None:
                         continue
+                    auto_submit = bool(config.get("auto_submit", False))
                     result = run_application(
                         page, job.get("apply_url") or job["source_url"], job_profile,
-                        auto_submit=bool(config.get("auto_submit", False)),
-                        allowed_ats=set(config.get("allowed_ats", [])),
-                        screenshot_dir=_resolve(root, config.get("screenshot_dir", "reports/screenshots")),
+                        auto_submit=auto_submit,
+                        allowed_ats=_allowed_ats_for_run(config, auto_submit=auto_submit),
+                        screenshot_dir=(
+                            _resolve(root, config.get("screenshot_dir", "reports/screenshots"))
+                            / f"job-{job['id']}"
+                        ),
                     )
                     db.record_application(job["id"], result.status, result.ats, result.blockers)
                     processed += 1
@@ -142,8 +155,13 @@ def run_pipeline(config: dict[str, Any], root: Path) -> dict[str, Any]:
 def main() -> None:
     root = Path(__file__).resolve().parents[2]
     config = json.loads((root / "config.json").read_text())
-    result = run_pipeline(config, root)
-    print(json.dumps(result, ensure_ascii=False))
+    lock_path = _resolve(root, config.get("hourly_lock", "data/hourly.lock"))
+    with exclusive_run_lock(lock_path) as acquired:
+        if not acquired:
+            print(json.dumps({"status": "skipped", "reason": "hourly_already_running"}))
+            return
+        result = run_pipeline(config, root)
+        print(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":

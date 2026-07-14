@@ -4,6 +4,7 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/browser-profile/
+data/browser-profile-*/
 data/profile.json
 data/run_control.json
 reports/*.md

@@ -147,7 +147,10 @@ def test_run_application_requires_visible_submission_confirmation(tmp_path: Path
             allowed_ats={"generic"}, screenshot_dir=tmp_path / "shots-uncertain",
         )
         assert ok.status == "submitted"
+        assert ok.screenshot and ok.screenshot.endswith("last-application-post-submit.png")
+        assert Path(ok.screenshot).exists()
         assert uncertain.status == "blocked"
+        assert uncertain.screenshot and uncertain.screenshot.endswith("last-application-post-submit.png")
         assert uncertain.blockers == ["envio sem confirmação verificável"]
         browser.close()
 
