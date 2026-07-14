@@ -4,12 +4,31 @@
   "profile": "data/profile.json",
   "run_control": "data/run_control.json",
   "screenshot_dir": "reports/screenshots",
-  "browser_profile": "data/browser-profile",
+  "browser_profiles": {
+    "brave": "data/browser-profile-brave",
+    "chrome": "data/browser-profile-chrome",
+    "chromium": "data/browser-profile-chromium"
+  },
+  "browser_candidates": [
+    {
+      "name": "brave",
+      "executable_path": "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+    },
+    {
+      "name": "chrome",
+      "executable_path": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    },
+    {
+      "name": "chromium",
+      "executable_path": null
+    }
+  ],
   "browser_enabled": false,
   "headless": true,
   "auto_submit": false,
   "allowed_ats": ["greenhouse", "lever", "ashby"],
   "min_fit_score": 75,
-  "daily_limit": 10,
+  "daily_target_min": 10,
+  "notification_target": "discord:1526233025346666617:1526233025346666617",
   "dashboard_port": 8765
 }

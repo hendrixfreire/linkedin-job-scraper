@@ -138,6 +138,31 @@ def has_human_challenge(page: Any) -> str | None:
     return None
 
 
+def has_submission_confirmation(page: Any) -> bool:
+    active_application_form = page.locator("input[type=file]").count() > 0
+    if not active_application_form:
+        submit_labels = page.locator("button[type=submit], input[type=submit]").evaluate_all(
+            "els => els.map(e => (e.innerText || e.value || '').toLowerCase())"
+        )
+        active_application_form = any(
+            "apply" in label or "submit application" in label or "enviar candidatura" in label
+            for label in submit_labels
+        )
+    if active_application_form:
+        return False
+
+    text = page.locator("body").inner_text(timeout=5000).lower()
+    text_terms = (
+        "thank you for applying", "application submitted", "application has been submitted",
+        "application was submitted successfully", "thanks for applying", "obrigado por se candidatar",
+        "obrigada por se candidatar", "candidatura enviada", "candidatura foi enviada",
+    )
+    if any(term in text for term in text_terms):
+        return True
+    path = page.url.lower()
+    return any(term in path for term in ("/confirmation", "/thank-you", "application-submitted"))
+
+
 def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit: bool, allowed_ats: set[str], screenshot_dir: str | Path) -> ApplicationResult:
     page.goto(url, wait_until="domcontentloaded", timeout=45000)
     page.wait_for_timeout(1000)
@@ -166,4 +191,9 @@ def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit
         return ApplicationResult("blocked", ats, page.url, ["botão de envio ambíguo"], fill.filled, str(shot))
     submit.click()
     page.wait_for_timeout(1500)
+    if not has_submission_confirmation(page):
+        return ApplicationResult(
+            "blocked", ats, page.url, ["envio sem confirmação verificável"],
+            fill.filled, str(shot),
+        )
     return ApplicationResult("submitted", ats, page.url, [], fill.filled, str(shot))

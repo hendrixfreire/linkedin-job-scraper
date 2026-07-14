@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS applications (
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY,
+    application_id INTEGER NOT NULL UNIQUE REFERENCES applications(id),
+    channel TEXT NOT NULL DEFAULT 'discord',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    delivered_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
 CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY,
     job_id INTEGER NOT NULL REFERENCES jobs(id),
@@ -128,16 +138,17 @@ class Database:
         with self.connect() as conn:
             return [dict(row) for row in conn.execute(query, args)]
 
-    def daily_queue(self, limit: int = 10, require_resume: bool = False) -> list[dict[str, Any]]:
+    def daily_queue(self, limit: int | None = None, require_resume: bool = False) -> list[dict[str, Any]]:
+        query = """SELECT j.* FROM jobs j LEFT JOIN applications a ON a.job_id=j.id
+            WHERE j.status='qualified' AND a.id IS NULL
+              AND (?=0 OR j.resume_path IS NOT NULL)
+            ORDER BY j.fit_score DESC, j.created_at ASC"""
+        args: tuple[Any, ...] = (int(require_resume),)
+        if limit is not None:
+            query += " LIMIT ?"
+            args += (int(limit),)
         with self.connect() as conn:
-            rows = conn.execute(
-                """SELECT j.* FROM jobs j LEFT JOIN applications a ON a.job_id=j.id
-                WHERE j.status='qualified' AND a.id IS NULL
-                  AND (?=0 OR j.resume_path IS NOT NULL)
-                ORDER BY j.fit_score DESC, j.created_at ASC LIMIT ?""",
-                (int(require_resume), limit),
-            )
-            return [dict(row) for row in rows]
+            return [dict(row) for row in conn.execute(query, args)]
 
     def cv_queue(self, limit: int = 10) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -185,8 +196,47 @@ class Database:
                   updated_at=datetime('now','localtime')""",
                 (job_id, status, ats, json.dumps(blockers, ensure_ascii=False)),
             )
+            application_id = int(conn.execute(
+                "SELECT id FROM applications WHERE job_id=?", (job_id,)
+            ).fetchone()["id"])
+            if status == "submitted":
+                conn.execute(
+                    "INSERT OR IGNORE INTO notifications(application_id,channel) VALUES (?,'discord')",
+                    (application_id,),
+                )
             conn.execute("UPDATE jobs SET status=?, blockers=?, updated_at=datetime('now','localtime') WHERE id=?", (status, json.dumps(blockers, ensure_ascii=False), job_id))
             conn.execute("INSERT INTO events(job_id,kind,payload) VALUES (?,?,?)", (job_id, f"application_{status}", json.dumps({"ats": ats, "blockers": blockers}, ensure_ascii=False)))
+
+    def pending_submission_notifications(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT n.id AS notification_id,n.attempts,a.id AS application_id,
+                    a.submitted_at,a.ats,j.id AS job_id,j.title,j.company,j.location,
+                    j.source_url,j.apply_url,j.description,j.fit_score,j.fit_reasons
+                FROM notifications n
+                JOIN applications a ON a.id=n.application_id
+                JOIN jobs j ON j.id=a.job_id
+                WHERE n.delivered_at IS NULL AND a.status='submitted'
+                ORDER BY n.created_at,n.id"""
+            )
+            return [dict(row) for row in rows]
+
+    def mark_notification_delivered(self, notification_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE notifications SET delivered_at=datetime('now','localtime'),
+                attempts=attempts+1,last_error=NULL,updated_at=datetime('now','localtime')
+                WHERE id=?""",
+                (notification_id,),
+            )
+
+    def mark_notification_failed(self, notification_id: int, error: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """UPDATE notifications SET attempts=attempts+1,last_error=?,
+                updated_at=datetime('now','localtime') WHERE id=?""",
+                (error[:500], notification_id),
+            )
 
     def add_feedback(self, job_id: int, rating: str, reason: str = "") -> None:
         with self.connect() as conn:

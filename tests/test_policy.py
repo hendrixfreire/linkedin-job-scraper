@@ -7,7 +7,7 @@ PROFILE = {
     "blocked_title_terms": ["junior", "júnior", "intern", "trainee"],
     "allowed_locations": ["brazil", "brasil", "são paulo", "sao paulo"],
     "min_fit_score": 70,
-    "daily_limit": 10,
+    "daily_target_min": 10,
 }
 
 

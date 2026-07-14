@@ -20,7 +20,7 @@ def test_ingest_is_idempotent(tmp_path: Path):
     assert db.list_jobs()[0]["source_score"] == 100
 
 
-def test_daily_queue_never_exceeds_limit(tmp_path: Path):
+def test_daily_queue_has_no_default_cap_but_accepts_optional_batch_size(tmp_path: Path):
     db = Database(tmp_path / "state.db")
     db.initialize()
     for idx in range(15):
@@ -31,12 +31,13 @@ def test_daily_queue_never_exceeds_limit(tmp_path: Path):
             "status": "qualified",
         })
 
-    assert len(db.daily_queue(limit=10)) == 10
+    assert len(db.daily_queue()) == 15
+    assert len(db.daily_queue(limit=4)) == 4
 
     first = db.daily_queue(limit=1)[0]
     db.record_application(first["id"], "submitted", "greenhouse", [])
     assert db.submitted_today() == 1
-    assert len(db.daily_queue(limit=10)) == 10
+    assert len(db.daily_queue()) == 14
 
 
 def test_feedback_updates_learned_weights_without_touching_hard_filters(tmp_path: Path):

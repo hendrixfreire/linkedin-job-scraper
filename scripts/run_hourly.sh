@@ -1,4 +1,5 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-exec .venv/bin/python -m candidatura_agent.hourly
+.venv/bin/python -m candidatura_agent.hourly
+exec .venv/bin/python -m candidatura_agent.notifications

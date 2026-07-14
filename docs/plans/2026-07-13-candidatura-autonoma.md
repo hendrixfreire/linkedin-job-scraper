@@ -2,7 +2,7 @@
 
 > **For Hermes:** executar com TDD e validar cada integração antes de habilitar autoenvio.
 
-**Goal:** coletar vagas horariamente, priorizar até 10 candidaturas aderentes por dia, preencher ATS externos, aprender com feedback e entregar relatório diário auditável.
+**Goal:** coletar vagas horariamente, buscar ao menos 10 candidaturas aderentes por dia sem teto diário, preencher ATS externos, aprender com feedback, notificar cada envio no Discord e entregar relatório diário auditável.
 
 **Architecture:** pipeline local orientado a estado em SQLite. O scraper existente produz candidatos; o agente ingere, pontua, resolve o ATS, preenche via Playwright com adaptadores e registra toda decisão. `computer_use` fica restrito a diálogos nativos/fallback; não é o motor principal.
 

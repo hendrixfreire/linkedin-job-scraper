@@ -23,24 +23,36 @@ HTML = r"""<!doctype html>
 <script>
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function sendFeedback(id,rating){const reason=document.getElementById('reason-'+id).value;await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_id:id,rating,reason})});await load()}
-async function load(){const d=await fetch('/api/snapshot').then(r=>r.json());document.getElementById('updated').textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');const order=['submitted','qualified','blocked','rejected','dry_run'];document.getElementById('stats').innerHTML=order.map(k=>`<div class="stat"><span class="meta">${esc(k)}</span><b>${d.stats[k]||0}</b></div>`).join('');document.getElementById('jobs').innerHTML=d.jobs.length?d.jobs.map(j=>`<article class="card"><div><div class="title">${esc(j.title)}</div><div class="company">${esc(j.company)} · ${esc(j.location)}</div><span class="tag">${esc(j.status)}</span>${j.ats?`<span class="tag">${esc(j.ats)}</span>`:''}<div class="feedback"><input id="reason-${j.id}" placeholder="motivo opcional"><button onclick="sendFeedback(${j.id},'good')">Boa</button><button onclick="sendFeedback(${j.id},'bad')">Ruim</button><button onclick="sendFeedback(${j.id},'irrelevant')">Irrelevante</button></div><div style="margin-top:12px"><a href="${esc(j.source_url)}" target="_blank" rel="noreferrer">Abrir vaga</a></div></div><div class="score">${j.fit_score}/100</div></article>`).join(''):'<div class="empty">Nenhuma vaga no banco.</div>'}
+async function load(){const d=await fetch('/api/snapshot').then(r=>r.json());document.getElementById('updated').textContent='atualizado '+new Date().toLocaleTimeString('pt-BR');const order=['submitted','qualified','blocked','rejected','dry_run'];const target=`<div class="stat"><span class="meta">meta mínima · sem teto</span><b>${d.daily_target.submitted}/${d.daily_target.minimum}</b></div>`;document.getElementById('stats').innerHTML=target+order.map(k=>`<div class="stat"><span class="meta">${esc(k)}</span><b>${d.stats[k]||0}</b></div>`).join('');document.getElementById('jobs').innerHTML=d.jobs.length?d.jobs.map(j=>`<article class="card"><div><div class="title">${esc(j.title)}</div><div class="company">${esc(j.company)} · ${esc(j.location)}</div><span class="tag">${esc(j.status)}</span>${j.ats?`<span class="tag">${esc(j.ats)}</span>`:''}<div class="feedback"><input id="reason-${j.id}" placeholder="motivo opcional"><button onclick="sendFeedback(${j.id},'good')">Boa</button><button onclick="sendFeedback(${j.id},'bad')">Ruim</button><button onclick="sendFeedback(${j.id},'irrelevant')">Irrelevante</button></div><div style="margin-top:12px"><a href="${esc(j.source_url)}" target="_blank" rel="noreferrer">Abrir vaga</a></div></div><div class="score">${j.fit_score}/100</div></article>`).join(''):'<div class="empty">Nenhuma vaga no banco.</div>'}
 load();setInterval(load,30000);
 </script></body></html>"""
 
 
-def dashboard_snapshot(db: Database) -> dict[str, Any]:
+def dashboard_snapshot(db: Database, daily_target_min: int = 10) -> dict[str, Any]:
     jobs = db.list_jobs()
     stats = Counter(job["status"] for job in jobs)
+    submitted = db.submitted_today()
     for job in jobs:
         for key in ("fit_reasons", "blockers"):
             try:
                 job[key] = json.loads(job[key])
             except (TypeError, json.JSONDecodeError):
                 job[key] = []
-    return {"stats": dict(stats), "jobs": jobs, "feedback": db.list_feedback()[:100]}
+    return {
+        "stats": dict(stats),
+        "daily_target": {
+            "minimum": daily_target_min,
+            "submitted": submitted,
+            "gap": max(0, daily_target_min - submitted),
+            "met": submitted >= daily_target_min,
+            "unlimited": True,
+        },
+        "jobs": jobs,
+        "feedback": db.list_feedback()[:100],
+    }
 
 
-def make_handler(db: Database):
+def make_handler(db: Database, daily_target_min: int = 10):
     class Handler(BaseHTTPRequestHandler):
         def setup(self) -> None:
             super().setup()
@@ -58,7 +70,7 @@ def make_handler(db: Database):
             if path in ("/", "/index.html"):
                 self._send(200, HTML.encode(), "text/html; charset=utf-8")
             elif path == "/api/snapshot":
-                body = json.dumps(dashboard_snapshot(db), ensure_ascii=False).encode()
+                body = json.dumps(dashboard_snapshot(db, daily_target_min), ensure_ascii=False).encode()
                 self._send(200, body, "application/json; charset=utf-8")
             elif path == "/api/health":
                 self._send(200, b'{"ok":true}', "application/json")
@@ -95,7 +107,10 @@ def main() -> None:
     db = Database(db_path)
     db.initialize()
     port = int(config.get("dashboard_port", 8765))
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(db))
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", port),
+        make_handler(db, int(config.get("daily_target_min", 10))),
+    )
     print(f"Dashboard: http://127.0.0.1:{port}")
     server.serve_forever()
 

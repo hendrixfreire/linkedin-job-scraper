@@ -13,9 +13,11 @@ def test_report_contains_submitted_and_blocked_jobs(tmp_path: Path):
     db.record_application(submitted, "submitted", "greenhouse", [])
     db.record_application(blocked, "blocked", "workday", ["login"])
 
-    report = build_daily_report(db, datetime.now().date())
+    report = build_daily_report(db, datetime.now().date(), daily_target_min=10)
     assert "Data Engineer" in report
     assert "BI Manager" in report
     assert "1 candidatura enviada" in report
+    assert "Meta mínima: 1/10" in report
+    assert "faltam 9" in report
     assert "1 bloqueada" in report
     assert "88/100" in report

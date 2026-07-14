@@ -19,7 +19,7 @@ def main() -> None:
     db = Database(db_path)
     db.initialize()
     today = datetime.now().date()
-    report = build_daily_report(db, today)
+    report = build_daily_report(db, today, daily_target_min=int(config.get("daily_target_min", 10)))
     output = root / "reports" / f"candidaturas-{today.isoformat()}.md"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(report)

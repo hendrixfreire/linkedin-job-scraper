@@ -1,7 +1,15 @@
 import json
 from pathlib import Path
 
-from candidatura_agent.hourly import _profile_for_job, run_pipeline
+from candidatura_agent.hourly import _browser_candidates, _profile_for_job, run_pipeline
+
+
+def test_browser_candidates_prioritize_brave_then_chrome_then_bundled():
+    assert _browser_candidates({}) == [
+        ("brave", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"),
+        ("chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        ("chromium", None),
+    ]
 
 
 def test_profile_for_job_uses_tailored_resume_when_required():
@@ -22,7 +30,7 @@ def test_hourly_pipeline_ingests_scores_and_writes_control(tmp_path: Path):
         "full_name": "Test", "target_titles": ["analytics engineer"],
         "preferred_skills": ["python", "sql", "bigquery", "gcp", "lakehouse"],
         "blocked_title_terms": ["junior"], "allowed_locations": ["brazil"],
-        "min_fit_score": 70, "daily_limit": 10,
+        "min_fit_score": 70, "daily_target_min": 10,
     }
     profile_path = tmp_path / "profile.json"
     profile_path.write_text(json.dumps(profile))
@@ -30,11 +38,15 @@ def test_hourly_pipeline_ingests_scores_and_writes_control(tmp_path: Path):
         "source_json": str(source), "database": str(tmp_path / "state.db"),
         "profile": str(profile_path), "run_control": str(tmp_path / "control.json"),
         "browser_enabled": False, "auto_submit": False, "allowed_ats": ["greenhouse"],
-        "min_fit_score": 70, "daily_limit": 10,
+        "min_fit_score": 70, "daily_target_min": 10,
     }
 
     result = run_pipeline(config, tmp_path)
 
     assert result["ingested"] == 1
     assert result["qualified"] == 1
+    assert result["daily_target_min"] == 10
+    assert result["target_gap"] == 10
+    assert result["target_met"] is False
+    assert "daily_limit" not in result
     assert json.loads((tmp_path / "control.json").read_text())["status"] == "ok"

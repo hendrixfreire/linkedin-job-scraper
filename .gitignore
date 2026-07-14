@@ -8,3 +8,4 @@ data/profile.json
 data/run_control.json
 reports/*.md
 reports/screenshots/
+reports/evidence/

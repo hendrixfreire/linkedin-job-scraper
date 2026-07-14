@@ -2,7 +2,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from candidatura_agent.browser import fill_known_fields
+from candidatura_agent.browser import fill_known_fields, has_submission_confirmation, run_application
 
 
 def test_fill_known_fields_blocks_sensitive_required_question(tmp_path: Path):
@@ -121,4 +121,49 @@ def test_file_is_uploaded_after_combobox_rerenders_form(tmp_path: Path):
         fill_known_fields(page, {"country": "Brazil", "resume": str(resume)})
 
         assert page.locator("#resume").evaluate("el => el.files.length") == 1
+        browser.close()
+
+
+def test_run_application_requires_visible_submission_confirmation(tmp_path: Path):
+    confirmed = tmp_path / "confirmed.html"
+    confirmed.write_text("""
+    <label for="email">Email</label><input id="email" required>
+    <button onclick="document.body.innerHTML='<h1>Thank you for applying</h1>'">Submit application</button>
+    """)
+    unconfirmed = tmp_path / "unconfirmed.html"
+    unconfirmed.write_text("""
+    <label for="email">Email</label><input id="email" required>
+    <button onclick="document.body.innerHTML='<h1>Processing</h1>'">Submit application</button>
+    """)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        ok = run_application(
+            page, confirmed.as_uri(), {"email": "test@example.com"}, auto_submit=True,
+            allowed_ats={"generic"}, screenshot_dir=tmp_path / "shots-ok",
+        )
+        uncertain = run_application(
+            page, unconfirmed.as_uri(), {"email": "test@example.com"}, auto_submit=True,
+            allowed_ats={"generic"}, screenshot_dir=tmp_path / "shots-uncertain",
+        )
+        assert ok.status == "submitted"
+        assert uncertain.status == "blocked"
+        assert uncertain.blockers == ["envio sem confirmação verificável"]
+        browser.close()
+
+
+def test_peopleforce_success_phrase_is_recognized():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content("<main>Application was submitted successfully.</main>")
+        assert has_submission_confirmation(page) is True
+        page.set_content("""
+            <form>
+              <div contenteditable="true">Thank you for applying</div>
+              <input type="file" name="resume">
+              <button type="submit">Apply</button>
+            </form>
+        """)
+        assert has_submission_confirmation(page) is False
         browser.close()

@@ -19,7 +19,7 @@ O sistema busca vagas no LinkedIn, grava tudo localmente, calcula aderência, pr
 | `README.md` | Visão resumida do projeto |
 | `docs/COMO-FUNCIONA.md` | Este mapa operacional |
 | `docs/arquitetura.html` | Diagrama visual do fluxo |
-| `config.json` | Chaves operacionais: limites, ATS permitidos e flags de navegador/envio |
+| `config.json` | Chaves operacionais: meta mínima, ATS permitidos, Discord e flags de navegador/envio |
 | `src/candidatura_agent/` | Código Python do sistema |
 | `tests/` | Testes automatizados |
 | `scripts/` | Comandos de execução |
@@ -175,7 +175,9 @@ Há duas rotinas que consultam o scraper: a antiga envia vagas ao Telegram e a n
 - score e filtros;
 - fila de qualificadas;
 - dashboard e relatório diário;
-- limite de dez candidaturas/dia;
+- meta mínima de dez candidaturas por dia, sem teto diário;
+- processamento de zero, uma ou várias vagas prontas em cada execução horária;
+- notificação individual no Discord após cada envio confirmado;
 - bloqueio de CAPTCHA, login, 2FA, ATS não autorizado e perguntas desconhecidas;
 - reutilização de respostas já aprovadas.
 
@@ -190,12 +192,37 @@ Configuração de segurança atual:
 
 ```json
 {
+  "daily_target_min": 10,
   "browser_enabled": false,
-  "auto_submit": false
+  "auto_submit": false,
+  "notification_target": "discord:1526233025346666617:1526233025346666617"
 }
 ```
 
-Portanto, o cron horário busca e classifica, mas não dispara candidaturas. A simulação Wellhub foi uma execução controlada separada.
+Dez é uma meta mínima, não um máximo. Quando o navegador for liberado, cada ciclo processará todas as vagas prontas e qualificadas encontradas; isso pode produzir mais de uma candidatura por hora e mais de dez no dia.
+
+A notificação usa a outbox `notifications` no SQLite. Um envio confirmado cria uma única entrada. `hermes send` entrega a mensagem no Discord e somente depois marca a entrada como entregue; falhas permanecem pendentes para retry na próxima execução.
+
+Formato padrão:
+
+```text
+CANDIDATURA ENVIADA
+
+Cargo: <cargo>
+Empresa: <empresa>
+Local: <local>
+Aderência: <score>/100
+Destaques: <motivos resumidos>
+ATS: <plataforma>
+Enviada em: <data/hora>
+
+Resumo: <descrição curta>
+
+Link da vaga: <URL externa>
+Origem: <URL do LinkedIn, quando diferente>
+```
+
+Portanto, o cron horário busca e classifica, mas ainda não dispara candidaturas porque os dois gates continuam desligados. A simulação Wellhub foi uma execução controlada separada.
 
 ## Estado verificado em 13/07/2026
 

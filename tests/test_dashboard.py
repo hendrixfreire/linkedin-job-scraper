@@ -14,8 +14,9 @@ def test_dashboard_snapshot_exposes_queue_and_feedback(tmp_path: Path):
     })
     db.add_feedback(job_id, "good", "aderente")
 
-    payload = dashboard_snapshot(db)
+    payload = dashboard_snapshot(db, daily_target_min=10)
 
     assert payload["stats"]["qualified"] == 1
+    assert payload["daily_target"] == {"minimum": 10, "submitted": 0, "gap": 10, "met": False, "unlimited": True}
     assert payload["jobs"][0]["title"] == "Data Engineer"
     assert payload["feedback"][0]["rating"] == "good"

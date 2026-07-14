@@ -7,17 +7,20 @@ from datetime import date
 from .db import Database
 
 
-def build_daily_report(db: Database, day: date) -> str:
+def build_daily_report(db: Database, day: date, daily_target_min: int = 10) -> str:
     rows = db.applications_for_date(day.isoformat())
     submitted = [row for row in rows if row["status"] == "submitted"]
     blocked = [row for row in rows if row["status"] == "blocked"]
     reviewed = [row for row in rows if row["status"] in ("review", "dry_run")]
+    gap = max(0, daily_target_min - len(submitted))
+    target_status = "meta atingida; excedentes permitidos" if gap == 0 else f"faltam {gap}"
 
     lines = [
         f"# Relatório de candidaturas — {day.strftime('%d/%m/%Y')}", "",
         f"**Resumo:** {len(submitted)} candidatura enviada" + ("s" if len(submitted) != 1 else "")
         + f" · {len(blocked)} bloqueada" + ("s" if len(blocked) != 1 else "")
-        + f" · {len(reviewed)} em simulação/revisão", "",
+        + f" · {len(reviewed)} em simulação/revisão",
+        f"**Meta mínima: {len(submitted)}/{daily_target_min}** · {target_status}", "",
     ]
     for row in rows:
         label = {"submitted": "ENVIADA", "blocked": "BLOQUEADA", "review": "REVISÃO", "dry_run": "SIMULAÇÃO"}.get(row["status"], row["status"].upper())
