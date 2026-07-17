@@ -97,9 +97,9 @@ SEARCHES = []
 def build_searches(keywords):
     """Build search queries from the list of active keywords.
 
-    Each keyword generates 2 queries: Remote Brazil + São Paulo (no
-    work-type filter, so it returns remote+hybrid+on-site and we filter
-    locally). Manager/Head roles skip the f_E=4 filter (already senior).
+    Each keyword generates 2 queries: Remote Brazil + Hybrid São Paulo.
+    Native work-type filters exclude on-site jobs before detail fetching.
+    Manager/Head roles skip the f_E=4 filter (already senior).
     """
     searches = []
     # Remote in Brazil — with seniority filter (f_E=4 for technical roles)
@@ -110,11 +110,10 @@ def build_searches(keywords):
             del search["f_E"]  # manager/head are senior by definition
         searches.append(search)
 
-    # São Paulo without work-type filter — returns remote+hybrid+on-site.
-    # We filter on-site outside SP during detail fetch (fetch_one).
+    # Hybrid São Paulo — f_WT=3 excludes on-site jobs at the API level.
     for kw in keywords:
         search = {"keywords": kw, "location": "São Paulo, Brazil",
-                  "f_TPR": "r2592000", "sortBy": "DD"}
+                  "f_WT": "3", "f_TPR": "r2592000", "sortBy": "DD"}
         if not any(m in kw.lower() for m in ["manager", "head"]):
             search["f_E"] = "4"
         searches.append(search)
@@ -856,7 +855,8 @@ def main():
     # ═══ STEP 7: FETCH DETAILS IN PARALLEL ═══
     # ThreadPoolExecutor with 3 workers — fetches description and work mode
     # of each job simultaneously. Max 8 jobs per run.
-    # Filters applied during fetch: closed jobs and on-site outside SP.
+    # Filters applied during fetch: closed jobs and any work mode other than
+    # remote or hybrid. On-site and unknown modes never reach the output.
     MAX_DETAIL = 8
     jobs_to_fetch = filtered[:MAX_DETAIL]
 
@@ -864,8 +864,8 @@ def main():
         """Fetch details for ONE job and apply final filters.
 
         Returns (job, details) if the job passes all filters.
-        Returns None if: deadline exceeded, no ID, closed job,
-        or on-site outside São Paulo.
+        Returns None if: deadline exceeded, no ID, closed job, or a work mode
+        other than remote/hybrid (including an unknown work mode).
         """
         if time.time() > deadline:
             return None
@@ -878,13 +878,12 @@ def main():
             print(f"Skipping closed job: {job['title']}", file=sys.stderr)
             return None
         work_mode = details.get("work_mode", "")
-        # On-site only if in SP (hybrid and remote pass through)
-        if work_mode.lower() in ("on-site", "presencial"):
-            loc_lower = job.get("location", "").lower()
-            is_sp = "são paulo" in loc_lower or "sao paulo" in loc_lower or re.search(r',\s*sp\b', loc_lower)
-            if not is_sp:
-                print(f"Skipping on-site job outside SP: {job['title']} — {job['location']}", file=sys.stderr)
-                return None
+        # Defense in depth: API queries use f_WT=2/3, but only confirmed
+        # remote/hybrid detail pages are eligible for delivery.
+        if work_mode.lower() not in ("remote", "remoto", "hybrid", "híbrido"):
+            mode_label = work_mode or "unknown work mode"
+            print(f"Skipping non-remote/hybrid job ({mode_label}): {job['title']} — {job['location']}", file=sys.stderr)
+            return None
         return (job, details)
 
     enriched = []

@@ -16,7 +16,7 @@ Feito pra rodar em cron sem nenhuma infraestrutura — sem banco de dados, sem a
 - **CV Tailoring** — `tailor_cv.py` adapta seu CV pra cada vaga. Com `LLM_API_KEY` setada, usa IA pra gerar um CV polido e otimizado (igual ao fluxo de produção). Sem chave, faz análise de keywords gratuita.
 - **Tracking de yield por keyword** — remove automaticamente keywords que não produzem nada após 15+ execuções
 - **Buscas paralelas com rate limiting** — 3 threads, 300ms entre páginas, deadline de 4 minutos
-- **Filtro por localização e senioridade** — apenas Brasil/São Paulo, remove júnior/estágio
+- **Filtro por localização, modalidade e senioridade** — Brasil remoto + São Paulo híbrido; bloqueia presencial, modalidade incerta, júnior e estágio
 - **Blocklist de empresas** — filtra agências de staffing/spam que postam vagas genéricas em volume (configurável via `LINKEDIN_COMPANY_BLOCKLIST`)
 - **Marcação completa de vagas vistas** — todas as vagas filtradas são lembradas, não só as detalhadas (evita repetição entre runs)
 - **Dashboard de métricas** — vê yield por keyword, execuções recentes, tamanho da base
