@@ -1,0 +1,23 @@
+# Personal configuration and runtime state
+config.json
+data/profile.json
+data/*.db
+data/*.db-*
+data/*.lock
+data/browser-profile*/
+data/run_control.json
+reports/*.md
+reports/screenshots/
+reports/evidence/
+
+# Python and tooling
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# OS and IDE
+.DS_Store
+.vscode/
+.idea/
