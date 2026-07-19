@@ -9,6 +9,7 @@ It starts conservative: browser automation and automatic submission are disabled
 - imports job listings from a JSON feed into SQLite;
 - scores jobs with an explainable policy and recorded feedback;
 - resolves external application URLs and recognizes supported ATS platforms;
+- can use an authenticated browser as a last-resort visual redirect resolver, without filling or submitting forms;
 - prepares a queue for per-job resume assets;
 - fills known form fields with Playwright while detecting blocking questions;
 - keeps an audit trail of jobs, decisions, applications, notifications, and feedback;
@@ -19,6 +20,10 @@ It starts conservative: browser automation and automatic submission are disabled
 The project does **not** type passwords, bypass CAPTCHA/2FA, invent legal/demographic/salary answers, or submit when a required blocker remains. A human must configure their own profile locally.
 
 `auto_submit` defaults to `false`. Even if enabled, submission is limited to explicit `allowed_ats` and only happens when the form has no blockers. Treat the mode change as a production deployment, not a checkbox with ambition issues.
+
+### URL-resolution fallback
+
+Some job boards hide their external destination behind an authenticated LinkedIn Apply button. When public searches fail, a Hermes agent may open the source job in the user's already authenticated browser, click **Apply**, and record only the final external URL. This step never types credentials, reads cookies, uploads a resume, answers questions, accepts terms, or submits an application. The URL must still pass the ATS validator before it enters the automated queue.
 
 ## Requirements
 

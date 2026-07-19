@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 SCHEMA = """
@@ -83,11 +84,20 @@ class Database:
     def __init__(self, path: str | Path):
         self.path = Path(path)
 
-    def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Open, commit or roll back, then close one SQLite connection."""
+        conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,8 +185,10 @@ class Database:
             )
             return [dict(row) for row in rows]
 
-    def asset_queue(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Lista vagas qualificadas que ainda precisam de URL ou CV."""
+    def asset_queue(self, limit: int = 10, stage: str | None = None) -> list[dict[str, Any]]:
+        """List qualified jobs for URL resolution or resume preparation."""
+        if stage not in (None, "resolve", "resume"):
+            raise ValueError(f"invalid asset stage: {stage}")
         with self.connect() as conn:
             rows = conn.execute(
                 """SELECT j.*,
@@ -185,10 +197,13 @@ class Database:
                 WHERE j.status='qualified' AND a.id IS NULL
                   AND (j.apply_url IS NULL OR j.resume_path IS NULL)
                   AND (j.resolution_retry_at IS NULL OR j.resolution_retry_at <= datetime('now','localtime'))
+                  AND (? IS NULL
+                    OR (? = 'resolve' AND j.apply_url IS NULL)
+                    OR (? = 'resume' AND j.apply_url IS NOT NULL AND j.resume_path IS NULL))
                 ORDER BY j.fit_score DESC,
                   CASE WHEN j.apply_url IS NULL THEN 0 ELSE 1 END,
                   j.created_at ASC LIMIT ?""",
-                (limit,),
+                (stage, stage, stage, limit),
             )
             return [dict(row) for row in rows]
 
