@@ -7,6 +7,24 @@ keywords.json
 # Custom output directory (if user runs locally)
 linkedin-jobs/
 
+# Runtime-only application-agent data
+**/config.json
+**/.env
+**/.env.*
+!**/.env.example
+**/data/profile.json
+**/data/*.db
+**/data/*.db-*
+**/data/*.lock
+**/data/browser-profile*/
+**/data/run_control.json
+**/reports/*.md
+**/reports/screenshots/
+**/reports/evidence/
+**/cookies/
+**/sessions/
+**/*.pdf
+
 # Python
 __pycache__/
 *.py[cod]
