@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hendrixfreire/linkedin-job-scraper/contracts/job-candidate.v1.schema.json",
+  "title": "JobCandidate v1",
+  "type": "object",
+  "required": ["contract", "schema_version", "produced_at", "jobs"],
+  "properties": {
+    "contract": {"const": "job-candidate"},
+    "schema_version": {"const": 1},
+    "produced_at": {"type": "string", "format": "date-time"},
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "source_job_id", "source_url", "title", "company", "location", "collected_at"],
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "source_job_id": {"type": "string", "minLength": 1},
+          "source_url": {"type": "string", "format": "uri"},
+          "title": {"type": "string", "minLength": 1},
+          "company": {"type": "string", "minLength": 1},
+          "location": {"type": "string"},
+          "work_mode": {"enum": ["remote", "hybrid", "on_site", "unknown"]},
+          "posted_at": {"type": "string"},
+          "description": {"type": "string"},
+          "source_score": {"type": "integer", "minimum": 0, "maximum": 100},
+          "collected_at": {"type": "string", "format": "date-time"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

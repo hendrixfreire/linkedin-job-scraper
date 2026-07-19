@@ -1,5 +1,8 @@
 import json
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from candidatura_agent.db import Database
 from candidatura_agent.ingest import ingest_linkedin_json
@@ -18,6 +21,30 @@ def test_ingest_is_idempotent(tmp_path: Path):
     assert ingest_linkedin_json(db, source) == 0
     assert len(db.list_jobs()) == 2
     assert db.list_jobs()[0]["source_score"] == 100
+
+
+def test_ingest_accepts_versioned_job_candidate_contract(tmp_path: Path):
+    source = tmp_path / "job-candidate.v1.json"
+    source.write_text(json.dumps({
+        "contract": "job-candidate", "schema_version": 1,
+        "produced_at": "2026-07-19T12:00:00Z",
+        "jobs": [{
+            "source": "linkedin", "source_job_id": "123",
+            "source_url": "https://www.linkedin.com/jobs/view/123",
+            "title": "Senior Data Engineer", "company": "Acme", "location": "Brazil",
+            "work_mode": "remote", "posted_at": "2026-07-19",
+            "description": "Python SQL", "source_score": 90,
+            "collected_at": "2026-07-19T11:59:00Z",
+        }],
+    }))
+    db = Database(tmp_path / "state.db")
+    db.initialize()
+
+    assert ingest_linkedin_json(db, source) == 1
+    job = db.list_jobs()[0]
+    assert job["external_id"] == "123"
+    assert job["source_score"] == 90
+    assert job["description"] == "Python SQL"
 
 
 def test_daily_queue_has_no_default_cap_but_accepts_optional_batch_size(tmp_path: Path):
@@ -83,3 +110,14 @@ def test_tailored_resume_assets_are_persisted_and_gate_queue(tmp_path: Path):
     assert queued[0]["resume_path"] == "/tmp/cv-tailored.pdf"
     assert queued[0]["apply_url"].startswith("https://job-boards.greenhouse.io/")
     assert db.cv_queue(limit=10) == []
+
+
+def test_database_context_closes_sqlite_connection_after_operation(tmp_path: Path):
+    db = Database(tmp_path / "state.db")
+    db.initialize()
+
+    with db.connect() as conn:
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        conn.execute("SELECT 1")
