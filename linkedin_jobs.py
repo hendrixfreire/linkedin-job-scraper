@@ -50,6 +50,7 @@ USER_NAME = os.environ.get("LINKEDIN_USER_NAME", "User")
 
 VAGAS_FILE = BASE_DIR / "jobs.md"
 JOBS_JSON = BASE_DIR / "jobs_new.json"
+JOB_CANDIDATE_JSON = BASE_DIR / "job_candidates.v1.json"
 SEEN_JSON = BASE_DIR / "seen.json"
 KEYWORDS_FILE = BASE_DIR / "keywords.json"
 
@@ -714,6 +715,34 @@ def format_vaga_md(job, details):
 # 8. Save state, keyword stats, JSON for agent, MD history
 
 
+def build_job_candidate_feed(jobs, produced_at=None):
+    """Build the versioned handoff without exposing user-specific runtime data."""
+    produced_at = produced_at or datetime.now().astimezone()
+    collected_at = produced_at.isoformat()
+    candidates = []
+    for job in jobs:
+        score = int(job.get("heuristic_score") or 0) * 20
+        candidates.append({
+            "source": "linkedin",
+            "source_job_id": str(job["id"]),
+            "source_url": job["url"],
+            "title": job.get("title", ""),
+            "company": job.get("company", ""),
+            "location": job.get("location", ""),
+            "work_mode": job.get("work_mode") or "unknown",
+            "posted_at": job.get("date") or "",
+            "description": job.get("description") or "",
+            "source_score": max(0, min(100, score)),
+            "collected_at": collected_at,
+        })
+    return {
+        "contract": "job-candidate",
+        "schema_version": 1,
+        "produced_at": produced_at.isoformat(),
+        "jobs": candidates,
+    }
+
+
 def main():
     """Full pipeline to scrape and dedup LinkedIn jobs."""
     now = datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -901,7 +930,8 @@ def main():
 
     if not enriched:
         print(f"No new jobs (all closed) — {now}")
-        JOBS_JSON.write_text("[]")  # empty JSON → agent processes nothing
+        JOBS_JSON.write_text("[]")  # legacy classifier consumes an empty list
+        JOB_CANDIDATE_JSON.write_text(json.dumps(build_job_candidate_feed([]), indent=2))
         return
 
     # ═══ STEP 8: SAVE STATE AND GENERATE OUTPUTS ═══
@@ -960,7 +990,13 @@ def main():
             "heuristic_reason": h_reason,
         })
     JOBS_JSON.write_text(json.dumps(jobs_for_agent, ensure_ascii=False, indent=2))
-    print(f"JSON saved: {len(jobs_for_agent)} jobs for classification", file=sys.stderr)
+    candidate_feed = build_job_candidate_feed(jobs_for_agent)
+    JOB_CANDIDATE_JSON.write_text(json.dumps(candidate_feed, ensure_ascii=False, indent=2))
+    print(
+        f"JSON saved: {len(jobs_for_agent)} jobs for classification; "
+        f"JobCandidate v1 saved to {JOB_CANDIDATE_JSON.name}",
+        file=sys.stderr,
+    )
 
     # --- 8d. Update MD history (append-only, never removes) ---
     vagas_md = []

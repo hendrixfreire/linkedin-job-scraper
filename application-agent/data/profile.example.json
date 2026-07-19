@@ -1,0 +1,14 @@
+{
+  "name": "Your Name",
+  "email": "you@example.com",
+  "phone": "+00 00000-0000",
+  "location": "Your City, Your Country",
+  "linkedin": "https://www.linkedin.com/in/your-profile",
+  "resume": "/absolute/path/to/your-resume.pdf",
+  "resume_strategy": "manual",
+  "target_titles": ["Data Engineer"],
+  "preferred_skills": ["Python", "SQL"],
+  "allowed_locations": ["remote", "your city"],
+  "blocked_title_terms": ["intern", "junior"],
+  "min_fit_score": 75
+}

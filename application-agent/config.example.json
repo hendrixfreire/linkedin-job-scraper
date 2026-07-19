@@ -1,0 +1,23 @@
+{
+  "source_json": "../jobs_new.json",
+  "database": "data/applications.db",
+  "profile": "data/profile.json",
+  "run_control": "data/run_control.json",
+  "hourly_lock": "data/hourly.lock",
+  "screenshot_dir": "reports/screenshots",
+  "browser_profiles": {
+    "chromium": "data/browser-profile-chromium"
+  },
+  "browser_candidates": [
+    {"name": "chromium", "executable_path": null}
+  ],
+  "browser_enabled": false,
+  "headless": true,
+  "auto_submit": false,
+  "allowed_ats": [],
+  "dry_run_allowed_ats": ["greenhouse", "lever", "ashby", "gupy", "peopleforce", "factorial"],
+  "min_fit_score": 75,
+  "daily_target_min": 5,
+  "notification_target": "CHANGE_ME",
+  "dashboard_port": 8765
+}
