@@ -291,6 +291,8 @@ def has_submission_confirmation(page: Any) -> bool:
         "thank you for applying", "application submitted", "application has been submitted",
         "application was submitted successfully", "thanks for applying", "obrigado por se candidatar",
         "obrigada por se candidatar", "candidatura enviada", "candidatura foi enviada",
+        # Ashby: "Your application was successfully sent to our team"
+        "successfully sent to our team", "application was successfully sent",
     )
     if any(term in text for term in text_terms):
         return True
@@ -318,11 +320,23 @@ def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit
     ats = detect_ats(page.url)
     _open_application_route(page, ats)
     ats = detect_ats(page.url)
+    # Ashby monta o form async ("Fetching application form", zero inputs por ~1-2s).
+    # O wait_for_timeout(1000) padrão é curto demais — espera o campo de email aparecer.
+    if ats == "ashby":
+        try:
+            page.wait_for_selector("input[type=email]", timeout=30000)
+            page.wait_for_timeout(2000)
+        except Exception:
+            pass
     challenge = has_human_challenge(page)
     if challenge:
         return ApplicationResult("blocked", ats, page.url, [challenge], [])
 
-    fill = fill_known_fields(page, profile)
+    if ats == "ashby":
+        from .ashby_adapter import fill_ashby_form
+        fill = fill_ashby_form(page, profile)
+    else:
+        fill = fill_known_fields(page, profile)
     blockers = list(fill.blockers)
     if ats not in allowed_ats:
         blockers.append(f"ATS não liberado: {ats}")
@@ -337,11 +351,19 @@ def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit
     if not auto_submit:
         return ApplicationResult("dry_run", ats, page.url, [], fill.filled, str(pre_shot))
 
-    submit = page.locator('button[type="submit"]:visible, input[type="submit"]:visible')
-    if submit.count() != 1:
-        submit = page.get_by_role("button", name=re.compile(r"submit|send|enviar|candidatar|apply", re.I))
-    if submit.count() != 1:
-        return ApplicationResult("blocked", ats, page.url, ["botão de envio ambíguo"], fill.filled, str(pre_shot))
+    # Ashby tem vários button[type=submit] (Upload/Yes/No) — filtra por texto "Submit Application"
+    if ats == "ashby":
+        submit = page.get_by_role("button", name="Submit Application")
+        if submit.count() == 0:
+            submit = page.locator('button[type="submit"]').filter(has_text="Submit Application")
+        if submit.count() != 1:
+            return ApplicationResult("blocked", ats, page.url, ["botão de envio ambíguo"], fill.filled, str(pre_shot))
+    else:
+        submit = page.locator('button[type="submit"]:visible, input[type="submit"]:visible')
+        if submit.count() != 1:
+            submit = page.get_by_role("button", name=re.compile(r"submit|send|enviar|candidatar|apply", re.I))
+        if submit.count() != 1:
+            return ApplicationResult("blocked", ats, page.url, ["botão de envio ambíguo"], fill.filled, str(pre_shot))
     submit.click()
     page.wait_for_timeout(1500)
     post_shot = shot_dir / "last-application-post-submit.png"
