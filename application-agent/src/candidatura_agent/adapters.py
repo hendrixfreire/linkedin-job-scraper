@@ -51,6 +51,8 @@ APPROVED_QUESTION_FIELDS = {
     "if you checked any of the options above": "conflict_details",
     "what is your availability to start": "availability_to_start",
     "expected monthly gross wage in euros": "expected_monthly_gross_eur",
+    "how many years of relevant experience": "years_relevant_experience",
+    "located within a ±4 hour range from the central european time": "within_cet_range",
     "qual sua pretensão salarial pj": "pj_salary_expectation",
     "qual a sua disponibilidade (em dias)": "start_availability_days",
     "atualmente você está atuando em algum projeto": "current_project_contract_type",

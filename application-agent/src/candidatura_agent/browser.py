@@ -351,10 +351,20 @@ def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit
     if not auto_submit:
         return ApplicationResult("dry_run", ats, page.url, [], fill.filled, str(pre_shot))
 
-    # Ashby tem vários button[type=submit] (Upload/Yes/No) — filtra por texto "Submit Application"
+    # Ashby renderiza o botão de envio sem type="submit" — é um <button> com a
+    # classe .ashby-application-form-submit-button e texto "Submit Application".
+    # O form é montado de forma assíncrona, então esperamos o botão ficar visível
+    # antes de tentar casar; isso evita o falso "botão de envio ambíguo" quando o
+    # React ainda está montando.
     if ats == "ashby":
-        submit = page.get_by_role("button", name="Submit Application")
-        if submit.count() == 0:
+        submit = page.locator("button.ashby-application-form-submit-button")
+        try:
+            submit.wait_for(state="visible", timeout=15000)
+        except Exception:
+            pass
+        if submit.count() != 1:
+            submit = page.get_by_role("button", name="Submit Application")
+        if submit.count() != 1:
             submit = page.locator('button[type="submit"]').filter(has_text="Submit Application")
         if submit.count() != 1:
             return ApplicationResult("blocked", ats, page.url, ["botão de envio ambíguo"], fill.filled, str(pre_shot))
