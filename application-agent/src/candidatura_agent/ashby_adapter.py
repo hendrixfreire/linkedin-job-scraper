@@ -301,6 +301,15 @@ def _select_radio_by_label(page: Any, group_name: str, target_label: str) -> boo
                 }""",
                 target_sel["id"],
             )
+        # espera o radio ficar :checked de fato (confirma o estado React)
+        radio_id = target_sel["id"]
+        try:
+            page.wait_for_function(
+                f'(document.getElementById("{radio_id}") || {{}}).checked === true',
+                timeout=4000,
+            )
+        except Exception:
+            pass  # alguns ATS usam aria ao invés de checked; verificação final pega
         return True
     except Exception:
         return False
