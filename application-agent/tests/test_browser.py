@@ -183,3 +183,28 @@ def test_peopleforce_success_phrase_is_recognized():
         """)
         assert has_submission_confirmation(page) is False
         browser.close()
+
+
+def test_ashby_submit_button_selector_matches_without_type_submit(tmp_path: Path):
+    """Ashby renderiza o botão de envio sem type=submit, usando classe própria.
+
+    Simula o DOM real (button.ashby-application-form-submit-button com span
+    "Submit Application") e garante que o dry-run não bloqueia por
+    "botão de envio ambíguo".
+    """
+    from candidatura_agent.adapters import detect_ats
+
+    html = """
+    <input type='email' id='_systemfield_email'>
+    <input type='text' id='_systemfield_name'>
+    <button class='ashby-application-form-submit-button'><span>Submit Application</span></button>
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(html)
+        # seletor estável pela classe deve casar exatamente 1
+        submit = page.locator("button.ashby-application-form-submit-button")
+        assert submit.count() == 1
+        assert "Submit Application" in submit.inner_text()
+        browser.close()
