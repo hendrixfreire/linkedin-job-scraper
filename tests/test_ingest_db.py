@@ -83,3 +83,76 @@ def test_tailored_resume_assets_are_persisted_and_gate_queue(tmp_path: Path):
     assert queued[0]["resume_path"] == "/tmp/cv-tailored.pdf"
     assert queued[0]["apply_url"].startswith("https://job-boards.greenhouse.io/")
     assert db.cv_queue(limit=10) == []
+
+
+def test_reopen_blocked_jobs_returns_resolvable_ones_to_the_queue(tmp_path: Path):
+    """Sem isso, vagas bloqueadas nunca são retentadas — nem depois de a causa sumir."""
+    db = Database(tmp_path / "state.db")
+    db.initialize()
+    fixable = db.upsert_job({
+        "external_id": "fix-1", "title": "Data Engineer", "company": "Acme",
+        "location": "Brazil", "source_url": "https://example.test/fix-1",
+        "apply_url": "https://job-boards.greenhouse.io/acme/jobs/1",
+        "resume_path": "/tmp/cv.pdf", "fit_score": 90, "status": "qualified",
+    })
+    human = db.upsert_job({
+        "external_id": "human-1", "title": "Data Engineer", "company": "Beta",
+        "location": "Brazil", "source_url": "https://example.test/human-1",
+        "apply_url": "https://job-boards.greenhouse.io/beta/jobs/1",
+        "resume_path": "/tmp/cv.pdf", "fit_score": 90, "status": "qualified",
+    })
+    db.record_application(fixable, "blocked", "greenhouse", ["CPF* CPF question_1"])
+    db.record_application(human, "blocked", "greenhouse", ["captcha"])
+
+    assert db.reopen_blocked_jobs() == 1
+
+    queued = {job["id"] for job in db.daily_queue(require_resume=True)}
+    assert fixable in queued
+    assert human not in queued
+
+    statuses = {job["id"]: job["status"] for job in db.list_jobs()}
+    assert statuses[fixable] == "qualified"
+    assert statuses[human] == "blocked"
+
+    kinds = [row["kind"] for row in db.list_events(fixable)]
+    assert "application_reopened" in kinds
+
+
+def test_reopen_blocked_jobs_can_be_forced_for_human_blockers(tmp_path: Path):
+    db = Database(tmp_path / "state.db")
+    db.initialize()
+    job_id = db.upsert_job({
+        "external_id": "human-2", "title": "Data Engineer", "company": "Gamma",
+        "location": "Brazil", "source_url": "https://example.test/human-2",
+        "fit_score": 90, "status": "qualified",
+    })
+    db.record_application(job_id, "blocked", "greenhouse", ["2fa"])
+
+    assert db.reopen_blocked_jobs() == 0
+    assert db.reopen_blocked_jobs(include_human=True) == 1
+
+
+def test_reopen_accepts_other_statuses_and_a_single_job(tmp_path: Path):
+    """Vagas em dry_run também ficam fora da fila; reabrir é o que as libera."""
+    db = Database(tmp_path / "state.db")
+    db.initialize()
+    ids = [
+        db.upsert_job({
+            "external_id": f"dry-{idx}", "title": "Data Engineer", "company": f"Co{idx}",
+            "location": "Brazil", "source_url": f"https://example.test/dry-{idx}",
+            "apply_url": "https://job-boards.greenhouse.io/co/jobs/1",
+            "resume_path": "/tmp/cv.pdf", "fit_score": 90, "status": "qualified",
+        })
+        for idx in range(3)
+    ]
+    for job_id in ids:
+        db.record_application(job_id, "dry_run", "greenhouse", [])
+
+    assert db.daily_queue(require_resume=True) == []
+    assert db.reopen_blocked_jobs(statuses=("dry_run",), job_id=ids[0]) == 1
+
+    queued = [job["id"] for job in db.daily_queue(require_resume=True)]
+    assert queued == [ids[0]]
+
+    assert db.reopen_blocked_jobs(statuses=("dry_run",)) == 2
+    assert len(db.daily_queue(require_resume=True)) == 3

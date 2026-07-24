@@ -93,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     resume = sub.add_parser("resume")
     resume.add_argument("--job-id", type=int, required=True)
     resume.add_argument("--path", required=True)
+
+    reopen = sub.add_parser("reopen")
+    reopen.add_argument("--include-human", action="store_true")
+    reopen.add_argument("--status", action="append", default=None)
+    reopen.add_argument("--job-id", type=int)
     return parser
 
 
@@ -109,6 +114,15 @@ def main(argv: list[str] | None = None) -> None:
             resolution_source=args.source,
         )
         result = {"job_id": args.job_id, "ats": ats, "apply_url": args.url}
+    elif args.command == "reopen":
+        result = {
+            "reopened": db.reopen_blocked_jobs(
+                include_human=args.include_human,
+                statuses=tuple(args.status or ("blocked",)),
+                job_id=args.job_id,
+            ),
+            "resolution_backoff_cleared": db.clear_resolution_backoff(),
+        }
     elif args.command == "fail-resolution":
         result = record_resolution_failure(
             db, args.job_id, args.error, retry_hours=args.retry_hours,

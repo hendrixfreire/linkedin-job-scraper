@@ -269,6 +269,74 @@ class Database:
                 }, ensure_ascii=False)),
             )
 
+    HUMAN_BLOCKERS = ("captcha", "2fa", "login", "verificação humana")
+
+    def list_events(self, job_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM events WHERE job_id=? ORDER BY id", (job_id,)
+            )
+            return [dict(row) for row in rows]
+
+    def reopen_blocked_jobs(
+        self, include_human: bool = False, *,
+        statuses: tuple[str, ...] = ("blocked",), job_id: int | None = None,
+    ) -> int:
+        """Devolve à fila vagas bloqueadas por causas que já foram corrigidas.
+
+        `run_pipeline` ignora vagas com status 'blocked' e `daily_queue` exige que
+        não exista application — sem esta reabertura, uma vaga bloqueada por campo
+        não mapeado permanece bloqueada para sempre, mesmo depois de a resposta
+        entrar no perfil. Bloqueios que exigem uma pessoa (captcha, 2FA, login)
+        só saem com `include_human`.
+        """
+        reopened = 0
+        placeholders = ",".join("?" for _ in statuses)
+        query = (
+            "SELECT a.id AS application_id, a.job_id, a.blockers "
+            "FROM applications a JOIN jobs j ON j.id=a.job_id "
+            f"WHERE a.status IN ({placeholders})"
+        )
+        args: tuple[Any, ...] = tuple(statuses)
+        if job_id is not None:
+            query += " AND a.job_id=?"
+            args += (int(job_id),)
+        with self.connect() as conn:
+            rows = conn.execute(query, args).fetchall()
+            for row in rows:
+                try:
+                    blockers = json.loads(row["blockers"])
+                except (TypeError, json.JSONDecodeError):
+                    blockers = []
+                text = " ".join(str(item).lower() for item in blockers)
+                if not include_human and any(term in text for term in self.HUMAN_BLOCKERS):
+                    continue
+                conn.execute("DELETE FROM notifications WHERE application_id=?", (row["application_id"],))
+                conn.execute("DELETE FROM applications WHERE id=?", (row["application_id"],))
+                conn.execute(
+                    """UPDATE jobs SET status='qualified',blockers='[]',
+                    updated_at=datetime('now','localtime') WHERE id=?""",
+                    (row["job_id"],),
+                )
+                conn.execute(
+                    "INSERT INTO events(job_id,kind,payload) VALUES (?,?,?)",
+                    (row["job_id"], "application_reopened", json.dumps({
+                        "previous_blockers": blockers,
+                    }, ensure_ascii=False)),
+                )
+                reopened += 1
+        return reopened
+
+    def clear_resolution_backoff(self) -> int:
+        """Permite nova tentativa de resolver URLs adiadas por erro já corrigido."""
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """UPDATE jobs SET resolution_retry_at=NULL,
+                updated_at=datetime('now','localtime')
+                WHERE apply_url IS NULL AND resolution_retry_at IS NOT NULL"""
+            )
+            return int(cursor.rowcount)
+
     def submitted_today(self) -> int:
         with self.connect() as conn:
             row = conn.execute(
