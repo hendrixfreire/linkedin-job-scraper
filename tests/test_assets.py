@@ -40,11 +40,34 @@ def test_infer_ats_recognizes_supported_domains():
     assert infer_ats("https://acme.factorialhr.com.br/job_posting/123") == "factorial"
 
 
+def test_infer_ats_recognizes_ats_common_in_brazil():
+    """Quinze vagas tinham URL oficial correta e foram descartadas pelo validador."""
+    assert infer_ats("https://acme.wd3.myworkdayjobs.com/pt-BR/careers/job/1") == "workday"
+    assert infer_ats("https://jobs.smartrecruiters.com/Acme/744000") == "smartrecruiters"
+    assert infer_ats("https://acme.solides.jobs/vacancies/123") == "solides"
+    assert infer_ats("https://acme.recruitee.com/o/data-engineer") == "recruitee"
+    assert infer_ats("https://apply.workable.com/acme/j/ABC123/") == "workable"
+    assert infer_ats("https://acme.teamtailor.com/jobs/123") == "teamtailor"
+    assert infer_ats("https://acme.bamboohr.com/careers/123") == "bamboohr"
+    assert infer_ats("https://acme.inhire.app/vagas/123") == "inhire"
+    assert infer_ats("https://www.vagas.com.br/vagas/v123") == "vagas"
+
+
 def test_validate_external_apply_url_rejects_linkedin_and_unknown_hosts():
     with pytest.raises(ValueError, match="LinkedIn"):
         validate_external_apply_url("https://www.linkedin.com/jobs/view/1")
     with pytest.raises(ValueError, match="ATS não reconhecido"):
         validate_external_apply_url("https://example.com/jobs/1")
+    with pytest.raises(ValueError, match="HTTPS"):
+        validate_external_apply_url("http://job-boards.greenhouse.io/acme/jobs/1")
+
+
+def test_ats_registry_is_shared_between_detection_and_validation():
+    """Duas listas mantidas à mão divergiam; agora é uma fonte só."""
+    from candidatura_agent.adapters import ATS_HOSTS
+    from candidatura_agent.assets import ATS_HOST_MARKERS
+
+    assert ATS_HOST_MARKERS is ATS_HOSTS
 
 
 def test_database_tracks_resolution_and_resume_separately(tmp_path: Path):

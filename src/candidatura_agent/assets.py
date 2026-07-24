@@ -13,14 +13,10 @@ if TYPE_CHECKING:
     from .db import Database
 
 
-ATS_HOST_MARKERS = {
-    "greenhouse": ("greenhouse.io",),
-    "lever": ("lever.co",),
-    "ashby": ("ashbyhq.com",),
-    "gupy": ("gupy.io",),
-    "peopleforce": ("peopleforce.io", "peopleforce.com"),
-    "factorial": ("factorialhr.com", "factorialhr.com.br"),
-}
+from .adapters import ATS_HOSTS, match_ats_host
+
+# Uma fonte só: detecção em página e validação de URL externa compartilham o registro.
+ATS_HOST_MARKERS = ATS_HOSTS
 
 
 class _DescriptionParser(HTMLParser):
@@ -58,11 +54,7 @@ def extract_linkedin_description(html: str) -> str:
 
 
 def infer_ats(url: str) -> str:
-    host = (urlsplit(url).hostname or "").lower()
-    for ats, markers in ATS_HOST_MARKERS.items():
-        if any(host == marker or host.endswith("." + marker) for marker in markers):
-            return ats
-    return "unknown"
+    return match_ats_host(urlsplit(url).hostname or "") or "unknown"
 
 
 def validate_external_apply_url(url: str) -> str:
