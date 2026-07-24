@@ -7,7 +7,13 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .adapters import classify_field, detect_ats
+from .adapters import build_answer_book, classify_field, detect_ats, match_choice
+
+
+CHOICE_FAILURES = {
+    "missing": "opção aprovada não encontrada",
+    "ambiguous": "escolha ambígua entre as opções oferecidas",
+}
 
 
 @dataclass(frozen=True)
@@ -44,9 +50,139 @@ def _field_label(locator: Any) -> str:
     )
 
 
+def _as_choice(value: Any) -> str | list[str]:
+    """Preserva a lista de redações alternativas; o resto vira texto."""
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return str(value)
+
+
+def _alternatives(value: Any) -> list[str]:
+    """As redações aprovadas de uma resposta, sempre como lista."""
+    choice = _as_choice(value)
+    return choice if isinstance(choice, list) else [choice]
+
+
+def _is_addressable(locator: Any) -> bool:
+    """Um campo que o formulário identifica de alguma forma — id ou name."""
+    return bool(locator.evaluate("el => Boolean(el.id || el.name)"))
+
+
+def _choice_group_label(locator: Any) -> str:
+    """Texto da pergunta que governa um grupo de radio/checkbox.
+
+    O rótulo de um radio é só a opção ("Sim"); a pergunta vive no ancestral que
+    reúne o grupo. Sem ela, toda escolha chegaria à classificação como "Sim".
+    """
+    return locator.evaluate(
+        r"""el => {
+          if (!el.name) return '';
+          let node = el.parentElement;
+          while (node && node !== document.body) {
+            const siblings = node.querySelectorAll(
+              `input[name="${CSS.escape(el.name)}"]`).length;
+            if (node.matches('fieldset') || siblings > 1) return (node.innerText || '').trim();
+            node = node.parentElement;
+          }
+          return '';
+        }"""
+    )
+
+
+def _choice_options(locator: Any) -> list[str]:
+    """Rótulos visíveis de cada opção de um grupo de radio/checkbox."""
+    return locator.evaluate(
+        r"""el => Array.from(document.getElementsByName(el.name)).map(item => {
+          const byFor = item.id ? document.querySelector(`label[for="${CSS.escape(item.id)}"]`) : null;
+          const wrapping = item.closest('label');
+          return (byFor?.innerText || wrapping?.innerText || item.value || '').trim();
+        })"""
+    )
+
+
+def _check_choice(locator: Any, index: int) -> None:
+    """Marca a opção pelo Playwright, não por click() sintético.
+
+    Um click() programático num controle dentro de <label> sobe até o rótulo, que
+    o reativa — o campo marca e desmarca no mesmo gesto.
+    """
+    target = locator.evaluate_handle(
+        "(el, index) => document.getElementsByName(el.name)[index]", index
+    ).as_element()
+    target.check()
+
+
+def _combobox_display(locator: Any) -> str:
+    """O texto que o combobox exibe ao redor do input, sem o que foi digitado.
+
+    react-select limpa o input ao confirmar e mostra o escolhido num elemento
+    próprio — mas mantém o texto digitado quando nada casa. Misturar os dois faria
+    uma busca fracassada parecer uma seleção bem-sucedida.
+    """
+    return locator.evaluate(
+        r"""el => {
+          let node = el.parentElement, around = '';
+          for (let level = 0; level < 3 && node; level++) {
+            around = (node.innerText || '').trim();
+            if (around) break;
+            node = node.parentElement;
+          }
+          return around;
+        }"""
+    )
+
+
+def _select_labels(locator: Any) -> list[str]:
+    return locator.evaluate(
+        "el => Array.from(el.options).map(o => (o.label || o.textContent || '').trim())"
+    )
+
+
+def _visible_options(page: Any) -> Any:
+    return page.locator('[role="option"]:visible')
+
+
+def _open_combobox(page: Any, locator: Any, wording: str | None = None) -> list[str]:
+    """Abre a lista e devolve as opções oferecidas, filtrando se preciso."""
+    locator.click()
+    if wording is not None:
+        locator.fill(wording)
+    try:
+        _visible_options(page).first.wait_for(timeout=2500)
+    except Exception:
+        return []
+    return [text.strip() for text in _visible_options(page).all_inner_texts()]
+
+
+def choose_in_combobox(page: Any, locator: Any, value: Any) -> str:
+    """Escolhe clicando na opção que corresponde à resposta aprovada.
+
+    Ler as opções e clicar na certa substitui digitar e supor: o react-select
+    mantém no input o texto que não casou nada, e isso fazia uma busca fracassada
+    passar por seleção — o formulário do C6 foi dado como completo com o campo de
+    raça/cor em branco. Devolve "ok", "missing" ou "ambiguous".
+    """
+    options = _open_combobox(page, locator)
+    index, verdict = match_choice(_as_choice(value), options)
+    if index is None:
+        for wording in _alternatives(value):
+            options = _open_combobox(page, locator, wording)
+            index, verdict = match_choice(wording, options)
+            if index is not None:
+                break
+    if index is None:
+        # Sem limpar, o texto da última tentativa fica no campo e parece resposta.
+        locator.fill("")
+        locator.press("Escape")
+        return verdict
+    _visible_options(page).nth(index).click()
+    return "ok"
+
+
 def fill_known_fields(page: Any, profile: dict[str, Any]) -> FillResult:
     filled: list[str] = []
     blockers: list[str] = []
+    answers = build_answer_book(profile)
     field_selectors = (
         'input:not([type=hidden]):not([type=file]):not([type=checkbox]):not([type=radio]), '
         'textarea:not([name^="g-recaptcha-response"]), select',
@@ -73,7 +209,13 @@ def fill_known_fields(page: Any, profile: dict[str, Any]) -> FillResult:
                 if group_checked:
                     continue
             label = _field_label(field)
-            rule = classify_field(label)
+            if not label.strip() and not _is_addressable(field):
+                # Proxy de validação do react-select: sem id, sem name e sem rótulo,
+                # não é uma pergunta — o campo real é o combobox que o acompanha.
+                continue
+            if field_type in ("checkbox", "radio"):
+                label = " ".join(filter(None, (_choice_group_label(field), label)))
+            rule = classify_field(label, answers)
             required = field.get_attribute("required") is not None or field.get_attribute("aria-required") == "true"
             if required and field_type not in ("file", "checkbox", "radio"):
                 current_value = field.input_value()
@@ -83,7 +225,7 @@ def fill_known_fields(page: Any, profile: dict[str, Any]) -> FillResult:
                 if required:
                     blockers.append(label or f"campo obrigatório #{index + 1}")
                 continue
-            value = profile.get(rule.key or "")
+            value = rule.value if rule.value is not None else profile.get(rule.key or "")
             if value in (None, ""):
                 if required:
                     blockers.append(label or rule.key or f"campo obrigatório #{index + 1}")
@@ -104,18 +246,27 @@ def fill_known_fields(page: Any, profile: dict[str, Any]) -> FillResult:
                 if not upload_still_on_input:
                     page.get_by_text(path.name, exact=True).wait_for(timeout=5000)
             elif tag == "select":
-                field.select_option(label=str(value))
+                options = _select_labels(field)
+                index, verdict = match_choice(_as_choice(value), options)
+                if index is None:
+                    blockers.append(f"{label}: {CHOICE_FAILURES[verdict]}")
+                    continue
+                field.select_option(index=index)
             elif field.get_attribute("role") == "combobox":
-                field.fill(str(value))
-                try:
-                    page.locator('[role="option"]:visible').first.wait_for(timeout=2500)
-                except Exception:
-                    pass
-                field.press("ArrowDown")
-                field.press("Enter")
+                verdict = choose_in_combobox(page, field, value)
+                if verdict != "ok":
+                    blockers.append(f"{label}: {CHOICE_FAILURES[verdict]}")
+                    continue
             elif field_type in ("checkbox", "radio"):
-                if bool(value):
-                    field.check()
+                if isinstance(value, bool):
+                    if value:
+                        field.check()
+                else:
+                    index, verdict = match_choice(_as_choice(value), _choice_options(field))
+                    if index is None:
+                        blockers.append(f"{label}: {CHOICE_FAILURES[verdict]}")
+                        continue
+                    _check_choice(field, index)
             else:
                 field.fill(str(value))
             filled.append(rule.key or label)
@@ -163,9 +314,49 @@ def has_submission_confirmation(page: Any) -> bool:
     return any(term in path for term in ("/confirmation", "/thank-you", "application-submitted"))
 
 
+SUBMIT_NAMES = re.compile(r"submit|send|enviar|candidatar|apply", re.I)
+
+
+def _wait_for_form(page: Any) -> None:
+    """Espera o formulário montar antes de julgar a página.
+
+    Formulários React só existem depois do domcontentloaded; medir cedo demais
+    mostra uma página quase vazia, sem perguntas e portanto sem bloqueios.
+    """
+    try:
+        page.locator("input:not([type=hidden]), select, textarea").first.wait_for(timeout=8000)
+    except Exception:
+        pass
+    try:
+        page.wait_for_load_state("networkidle", timeout=8000)
+    except Exception:
+        pass
+    page.wait_for_timeout(1000)
+
+
+def _submit_button(page: Any) -> Any | None:
+    """O botão que realmente envia, ou None se não der para decidir com certeza.
+
+    Greenhouse em PT expõe "Candidate-se" — uma âncora que apenas rola até o
+    formulário, mas cujo nome acessível ("Apply for this job") casa o mesmo padrão
+    do botão de envio. O desempate é `type=submit`, e só quando houver um único.
+    """
+    matches = page.get_by_role("button", name=SUBMIT_NAMES)
+    total = matches.count()
+    if total == 1:
+        return matches.first
+    submitters = [
+        index for index in range(total)
+        if (matches.nth(index).get_attribute("type") or "").lower() == "submit"
+    ]
+    if len(submitters) == 1:
+        return matches.nth(submitters[0])
+    return None
+
+
 def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit: bool, allowed_ats: set[str], screenshot_dir: str | Path) -> ApplicationResult:
     page.goto(url, wait_until="domcontentloaded", timeout=45000)
-    page.wait_for_timeout(1000)
+    _wait_for_form(page)
     challenge = has_human_challenge(page)
     ats = detect_ats(page.url)
     if challenge:
@@ -173,6 +364,10 @@ def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit
 
     fill = fill_known_fields(page, profile)
     blockers = list(fill.blockers)
+    if not fill.filled and not fill.blockers:
+        # Nada preenchido e nada bloqueado significa que não havia formulário:
+        # vaga expirada, página de erro ou formulário que só abre após um clique.
+        blockers.append("formulário de candidatura não encontrado")
     if ats not in allowed_ats:
         blockers.append(f"ATS não liberado: {ats}")
 
@@ -186,8 +381,8 @@ def run_application(page: Any, url: str, profile: dict[str, Any], *, auto_submit
     if not auto_submit:
         return ApplicationResult("dry_run", ats, page.url, [], fill.filled, str(pre_shot))
 
-    submit = page.get_by_role("button", name=re.compile(r"submit|send|enviar|candidatar|apply", re.I))
-    if submit.count() != 1:
+    submit = _submit_button(page)
+    if submit is None:
         return ApplicationResult("blocked", ats, page.url, ["botão de envio ambíguo"], fill.filled, str(pre_shot))
     submit.click()
     page.wait_for_timeout(1500)
